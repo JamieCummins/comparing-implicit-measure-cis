@@ -1,0 +1,275 @@
+---
+title: "processing"
+author: "Jamie Cummins"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+```{r}
+
+trial_level_df <- read_csv("../../sensitivity-to-relational-information/measure 3 - pep/data/processed/trial_level.csv") %>%
+  filter(all_criteria_met == 1) %>%
+  distinct() %>%
+  pivot_longer(c(rt, auc),
+               names_to = "scale",
+               values_to = "score") %>%
+  filter((variant == "mt" & scale == "auc") |
+         (variant == "rt" & scale == "rt")) %>%
+  group_by(unique_id, trial_consistency) %>%
+  filter(n() >= 10) %>%
+  ungroup()
+
+n_boots = 2000
+
+```
+
+# compute scores
+
+```{r}
+
+# bootstrapping has a long execution time, so load saved values if they've already been calculated
+if(file.exists("models/data_estimates_PI.rds")) {
+  
+  data_estimates_PI <- read_rds("models/data_estimates_PI.rds")
+  
+} else {
+  
+  # Fast calculation of the A statistic - code from Ruscio (2008) supplementary materials
+  PI_score <- function(data, i) {
+    data_with_indexes <- data[i,] # boot function requires data and index
+    x  <- na.omit(data_with_indexes$score[data_with_indexes$trial_consistency == "inconsistent"])
+    y  <- na.omit(data_with_indexes$score[data_with_indexes$trial_consistency == "consistent"])
+    nx <- length(x)
+    ny <- length(y)
+    rx <- sum(rank(c(x, y))[1:nx])
+    PI <- (rx / nx - (nx + 1) / 2) / ny
+    return(PI)
+  }
+  
+  bootstrap_PI_score <- function(data){
+    
+    require(dplyr)
+    require(boot)
+    
+    fit <- 
+      boot::boot(data      = data, 
+                 statistic = PI_score, 
+                 R         = n_boots, 
+                 sim       = "ordinary", 
+                 stype     = "i",
+                 parallel  = "multicore", 
+                 ncpus     = parallel::detectCores())
+    
+    results <- boot::boot.ci(fit, conf = 0.95, type = c("norm"))
+    
+    output <- 
+      tibble(method   = c("normal"),
+             estimate = fit$t0,
+             ci_lower = c(results$normal[2]),
+             ci_upper = c(results$normal[3]))
+    
+    return(output)
+  }
+  
+  # bootstrap PI scores 
+  data_estimates_PI <- trial_level_df %>%
+    select(unique_id, trial_consistency, variant, score) %>%
+    mutate(unique_id = as.factor(unique_id),
+           trial_consistency = as.character(trial_consistency),
+           score = as.numeric(score)) %>%
+    group_by(unique_id, variant) %>%
+    do(bootstrap_PI_score(data = .)) %>%
+    ungroup() %>%
+    mutate(sig = ifelse((ci_lower < 0.50 & ci_upper < 0.50) | (ci_lower > 0.50 & ci_upper > 0.50), TRUE, FALSE),
+           ci_width = ci_upper - ci_lower) %>%
+    round_df(3)
+  
+  # save to disk
+  write_rds(data_estimates_PI, "models/data_estimates_PI.rds", compress = "gz")
+  
+}
+
+```
+
+
+
+
+
+```{r}
+
+# read in data
+# I don't know why exactly, but this participant's mouse trajectory data make the mt_measures() function crash.
+# I couldn't figure out why, and in the end it was just easier to do the process of elimination to find out which participant
+# was causing the bug and to exclude them. 
+excluded_participant <- c("ad291")
+
+raw_rt_luuparedirect_df <- read_rds("raw/raw_rt_luuparedirect_data.rds") %>%
+  mutate(variant = "rt")
+raw_rt_niffaredirect_df <- read_rds("raw/raw_rt_niffaredirect_data.rds") %>%
+  mutate(variant = "rt")
+raw_mt_luuparedirect_df <- read_rds("raw/raw_mt_luuparedirect_data.rds") %>%
+  mutate(variant = "mt") %>%
+  filter(!(unique_id %in% excluded_participant))
+raw_mt_niffaredirect_df <- read_rds("raw/raw_mt_niffaredirect_data.rds") %>%
+  mutate(variant = "mt")
+
+
+```
+
+# join data frames
+
+```{r}
+
+full_raw_rt_data_df <- raw_rt_luuparedirect_df %>%
+  bind_rows(raw_rt_niffaredirect_df)
+
+full_raw_mt_data_df <- raw_mt_luuparedirect_df %>%
+  bind_rows(raw_mt_niffaredirect_df)
+
+```
+
+
+#
+
+
+```{r}
+
+rt_pep_cleaned_df <- full_raw_rt_data_df %>%
+  
+  # filter out irrelevant components of trial
+  filter(str_detect(sender, "catch") |
+         str_detect(sender, "probe") |
+         str_detect(sender, "error")) %>%
+  
+  # separate sender column into block, trial, and component columns
+  # will return NA for questionnaire-based trials, this is no issue
+  separate(sender_id, into = c("block", "irrelevant value", "trial_num", "component"), sep = "_") %>%
+  
+  # mutate block variable
+  mutate(block = ifelse(block == "10", "practice", 
+                 ifelse(block == "12", "main", "non_pep")),
+         
+         # reformat trial number variable
+         trial_num = as.numeric(trial_num) + 1) %>%
+  
+  # remove practice trials
+  filter(block == "main") %>%
+  
+  # remove extraneous probe/catch components
+  filter(sender == "probe" & !(is.na(duration)) |
+         sender == "catch" & !(is.na(duration))) %>%
+  
+  mutate(relation = case_when(word3 == "ARE" ~ "are",
+                              word2 == "SHOULD" ~ "should"),
+         
+         
+        # I should have just coded this into the csv file used in labjs, but I didn't, so now you have to suffer through me doing it here (sorry...)
+        trial_type = case_when((word2 == "LUUPITES" | word1 == "LUUPITES") & 
+                                      relation == "are" &
+                                      word4 == "DIRECT" & 
+                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") ~ "1",
+                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
+                                      relation == "are" &
+                                      word4 == "DIRECT" & 
+                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") ~ "2",
+                                      
+                                      
+                                      (word2 == "LUUPITES" | word1 == "LUUPITES") & 
+                                      relation == "are" &
+                                      word4 == "KIND" & 
+                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") ~ "1",
+                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
+                                      relation == "are" &
+                                      word4 == "KIND" & 
+                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") ~ "2",
+        
+        
+                                      (word2 == "LUUPITES" | word1 == "LUUPITES") & 
+                                      relation == "are" &
+                                      word4 == "DIRECT" & 
+                                      probe == "FALSE" ~ "1",
+                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
+                                      relation == "are" &
+                                      word4 == "DIRECT" & 
+                                      probe == "FALSE" ~ "2",
+                                      
+                                      
+                                      (word2 == "LUUPITES" | word1 == "LUUPITES") & 
+                                      relation == "are" &
+                                      word4 == "KIND" & 
+                                      probe == "FALSE" &
+                                      condition == "luuparedirect" ~ "consistent",
+                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
+                                      relation == "are" &
+                                      word4 == "KIND" & 
+                                      probe == "FALSE" &
+                                      condition == "niffaredirect" ~ "consistent",
+                                      
+                                      (word2 == "LUUPITES" | word1 == "LUUPITES") & 
+                                      relation == "should" &
+                                      word4 == "DIRECT" & 
+                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") &
+                                      condition == "niffaredirect" ~ "consistent",
+                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
+                                      relation == "should" &
+                                      word4 == "DIRECT" & 
+                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") &
+                                      condition == "luuparedirect" ~ "consistent",
+                                      
+                                      
+                                      (word2 == "LUUPITES" | word1 == "LUUPITES") & 
+                                      relation == "should" &
+                                      word4 == "KIND" & 
+                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") &
+                                      condition == "luuparedirect" ~ "consistent",
+                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
+                                      relation == "should" &
+                                      word4 == "KIND" & 
+                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") &
+                                      condition == "niffaredirect" ~ "consistent",
+        
+        
+                                      (word2 == "LUUPITES" | word1 == "LUUPITES") & 
+                                      relation == "should" &
+                                      word4 == "DIRECT" & 
+                                      probe == "FALSE" &
+                                      condition == "luuparedirect" ~ "consistent",
+                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
+                                      relation == "should" &
+                                      word4 == "DIRECT" & 
+                                      probe == "FALSE" &
+                                      condition == "niffaredirect" ~ "consistent",
+                                      
+                                      
+                                      (word2 == "LUUPITES" | word1 == "LUUPITES") & 
+                                      relation == "should" &
+                                      word4 == "KIND" & 
+                                      probe == "FALSE" &
+                                      condition == "niffaredirect" ~ "consistent",
+                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
+                                      relation == "should" &
+                                      word4 == "KIND" & 
+                                      probe == "FALSE" &
+                                      condition == "luuparedirect" ~ "consistent",
+                                      
+                                      TRUE ~ "inconsistent")) %>%
+  
+  # select only relevant variables
+  select(unique_id, trial_num, trial_type = sender, rt = duration, variant,
+         probe, response, correct, condition, trial_consistency, relation) %>%
+  filter(probe != "??TRUE OR FALSE??") %>%
+  
+  # recode correct column
+  mutate(correct = case_when(correct == TRUE ~ 1, 
+                                      TRUE ~ 0)) 
+
+
+```
+
+

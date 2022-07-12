@@ -13,30 +13,221 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 
-trial_level_df <- read_csv("../../sensitivity-to-relational-information/measure 3 - pep/data/processed/trial_level.csv") %>%
-  filter(all_criteria_met == 1) %>%
-  distinct() %>%
-  pivot_longer(c(rt, auc),
-               names_to = "scale",
-               values_to = "score") %>%
-  filter((variant == "mt" & scale == "auc") |
-         (variant == "rt" & scale == "rt")) %>%
-  group_by(unique_id, trial_consistency) %>%
-  filter(n() >= 10) %>%
-  ungroup()
+library(tidyverse)
 
-n_boots = 2000
+raw_trial_level_df <- read.delim("raw/impraw.txt") 
+raw_sessions_df <- read.delim("raw/allds.txt")
 
 ```
+
+# screen and identify the completed sessions and their corresponding measures
+
+```{r}
+
+completed_sessions_df <- raw_sessions_df |>
+  select(User_ID, SESSION_ID, 
+         contains(c("Race", "Pltc", "Self")), 
+         -contains(c("21", "22", "31", "32", "33", 
+                     "RT", "cgat"))) |>
+  mutate(across(everything(),
+                as.character)) |>
+  pivot_longer(cols = -contains(c("ID")),
+               names_to = "scale",
+               values_to = "score") %>%
+  filter(!is.na(score),
+         scale != "race") |>
+  separate(scale, 
+           c("measure", "domain"),
+           "(?!^)(?=[[:upper:]])")
+
+```
+
+# tidy the trial-level data and include only those completed cases
+
+```{r}
+
+trial_level_tasks_labelled_df <-
+  raw_trial_level_df |>
+  mutate(across(everything(),
+                as.character)) |>
+  
+  # remove sessions with no complete implicit measures
+  semi_join(completed_sessions_df, by = "SESSION_ID") |>
+  mutate(measure_firstblock = case_when(TASK_NAME_S %in% c("BBlkBad", "BWhtGood",
+                                                           "BRepBad", "BDemGood",
+                                                           "BOtrBad", "BSlfGood") ~ "biat_con",
+                                        TASK_NAME_S %in% c("BBlkGood", "BWhtBad",
+                                                           "BRepGood", "BDemBad",
+                                                           "BOtrGood", "BSlfBad") ~ "biat_incon",
+                                        TASK_NAME_S %in% c("GBlkBad", "GWhtGood",
+                                                           "GRepBad", "GDemGood",
+                                                           "GOtrBad", "GSlfGood") ~ "gnat_con",
+                                        TASK_NAME_S %in% c("GBlkGood", "GWhtBad",
+                                                           "GRepGood", "GDemBad",
+                                                           "GOtrGood", "GSlfBad") ~ "gnat_incon",
+                                        TASK_NAME_S %in% c("eppltc", 
+                                                           "eprace", "epself") ~ "ept",
+                                        TASK_NAME_S %in% c("amppltc", 
+                                                           "amprace", "ampself") ~ "amp",
+                                        TASK_NAME_S %in% c("iwhtgood", 
+                                                           "iDemGood", "iSlfGood") ~ "iat_con",
+                                        TASK_NAME_S %in% c("iwhtbad", 
+                                                           "iRepGood", "iSlfBad") ~ "iat_incon",
+                                        TASK_NAME_S %in% c("scbdblk", "scbdotr",
+                                                           "scbdrep", "scgddem",
+                                                           "scgdslf", "scgdwht") ~ "siat_con",
+                                        TASK_NAME_S %in% c("scgdblk", "scgdotr",
+                                                           "scgdrep", "scbddem",
+                                                           "scbdslf", "scbdwht") ~ "siat_incon",
+                                        TASK_NAME_S %in% c("spdpltc", "spdrace",
+                                                           "spdself") ~ "speededresponse",
+                                        TRUE ~ "irrelevant"),
+         domain = case_when(str_detect(TASK_NAME_S, "Blk|Wht|blk|wht|race") ~ "race",
+                            str_detect(TASK_NAME_S, "Slf|Otr|slf|otr|self") ~ "self",
+                            str_detect(TASK_NAME_S, "Dem|Rep|dem|rep|pltc") ~ "politics",
+                            TRUE ~ "irrelevant")) |>
+  filter(domain != "irrelevant",
+         measure_firstblock != "irrelevant") |>
+  separate(measure_firstblock,
+           into = c("measure", "first_block"),
+           sep = "_")
+
+
+```
+
+
+# score measures
+To-do: make sure measures are scored with appropriate metric (i.e., AMP with accuracy not RT)
+
+```{r}
+
+block_consistent_terms <- "White People/Good|Self/Good|Democrats/Good|Good Words/White|Bad Words/Black|Good Words/Democrats|Bad Words/Republicans|Good Words/Self|Bad Words/Others"
+block_inconsistent_terms <- "Black People/Good|Others/Good|Republicans/Good|Good Words/Black|Bad Words/White|Good Words/Republicans|Bad Words/Democrats|Good Words/Others|Bad Words/Self"
+trial_consistent_terms <- "mtmmgore|mtmmkry|mtmmclnt|mtmmobm|mtmmbclnt|mtmmhclnt|Mine|Me|Myself|Self|\\[I\\]|epwm|epwf|mtmmwf|mtmmwm"
+trial_inconsistent_terms <- "mtmmrgn|mtmmbsh|mtmmgln|mtmmcnd|They|Them|Their|Others|epbm|epbf|mtmmbf|mtmmbm"
+
+
+critical_trials_df <- trial_level_tasks_labelled_df |>
+  
+  # keep only relevant blocks/trials
+  filter(
+    (measure == "iat" & BLOCK_NUMBER %in% c("2", "3", "5", "6"))
+    |
+    (measure == "biat" & BLOCK_NUMBER %in% c(1:8) & TRIAL_NUMBER %in% c(4:19))
+    |
+    (measure == "amp" & BLOCK_NUMBER %in% c(1:2) & str_detect(TRIAL_NAME_S, "[XXXXXX]|Grey", negate = TRUE))
+    |
+    (measure == "gnat" & BLOCK_NUMBER %in% c(1:8))
+    |
+    (measure == "ept" & BLOCK_NUMBER %in% c(1:3))
+    |
+    (measure == "siat")) |>
+  mutate(trial_consistency = case_when(
+    measure %in% c("iat", "biat", "gnat") & 
+      str_detect(BLOCK_PAIRING_DEFINITION_S, 
+                 block_consistent_terms) ~ "consistent",
+    measure %in% c("iat", "biat", "gnat") & 
+      str_detect(BLOCK_PAIRING_DEFINITION_S, 
+                 block_inconsistent_terms) ~ "inconsistent",
+    measure == "amp" & str_detect(TRIAL_NAME_S, 
+                                  trial_consistent_terms) ~ "consistent",
+    measure == "amp" & str_detect(TRIAL_NAME_S, 
+                                  trial_inconsistent_terms) ~ "inconsistent",
+    measure == "siat" & 
+      str_detect(BLOCK_PAIRING_DEFINITION_S, 
+                 block_consistent_terms) ~ "consistent",
+    measure == "siat" & 
+      str_detect(BLOCK_PAIRING_DEFINITION_S, 
+                 block_inconsistent_terms) ~ "inconsistent",
+    measure == "ept" & 
+      TRIAL_RESPONSE_S == "Good" & 
+      str_detect(TRIAL_NAME_S, 
+                 trial_consistent_terms) ~ "consistent",
+    measure == "ept" & 
+      TRIAL_RESPONSE_S == "Bad" & 
+      str_detect(TRIAL_NAME_S,
+                 trial_inconsistent_terms) ~ "consistent",
+    measure == "ept" & 
+      TRIAL_RESPONSE_S == "Good" & 
+      str_detect(TRIAL_NAME_S, 
+                 trial_inconsistent_terms) ~ "inconsistent",
+    measure == "ept" & 
+      TRIAL_RESPONSE_S == "Bad" & 
+      str_detect(TRIAL_NAME_S, 
+                 trial_consistent_terms) ~ "inconsistent"),
+    TRIAL_ERROR = as.numeric(TRIAL_ERROR),
+    TRIAL_LATENCY = as.numeric(TRIAL_LATENCY),
+    score = case_when(measure %in% c("iat", "biat", "siat", "gnat") ~ TRIAL_LATENCY,
+                      measure %in% c("amp") ~ TRIAL_ERROR,
+                      measure %in% c("ept") ~ abs(TRIAL_ERROR - 1)))
+
+view_df <- critical_trials_df |>
+  filter(measure == "ept")
+
+```
+
+
+# apply exclusions
+
+## at session level
+Exclusions applied same as those from Bar-Anan & Nosek, 2014
+
+```{r}
+
+participants_after_session_level_exclusions <- critical_trials_df |>
+  mutate(rt_under_300 = case_when(TRIAL_LATENCY < 300 ~ 1,
+                                   TRUE ~ 0)) |>
+  group_by(SESSION_ID, measure, domain) |>
+  summarise(mean_rts_under_300 = mean(rt_under_300),
+            mean_errors = mean(TRIAL_ERROR)) |>
+  ungroup() |>
+  filter(
+    (measure %in% c("iat", "biat", "siat", "gnat") & mean_rts_under_300 < .1) 
+    |
+    (measure %in% c("ept") & mean_errors < .4) # errors are coded as 1
+    | 
+    (measure %in% c("amp") & (mean_errors < .95 & mean_errors > .05))
+  ) |>
+  select(SESSION_ID, measure, domain)
+  
+
+
+```
+
+
+## at trial level
+Exclusions applied same as those from Bar-Anan & Nosek, 2014
+
+```{r}
+
+all_exclusions_applied_df <- critical_trials_df |>
+  semi_join(participants_after_session_level_exclusions) |>
+  filter(
+    (measure %in% c("iat", "biat", "siat") & (TRIAL_LATENCY > 400 & TRIAL_LATENCY < 10000)) 
+    |
+    (measure %in% c("gnat") & (TRIAL_LATENCY > 400 & TRIAL_LATENCY < 1200) & (TRIAL_ERROR %in% c(0, 3)))
+    |
+    (measure %in% c("ept", "amp"))
+  )
+
+all_exclusions_applied_df |>
+  filter(measure == "ept")
+
+```
+
 
 # compute scores
 
 ```{r}
 
-# bootstrapping has a long execution time, so load saved values if they've already been calculated
-if(file.exists("models/data_estimates_PI.rds")) {
+n_boots = 100
+subset_sample = TRUE # to reduce processing time for testing
+
+# load models if already calculated
+# file.exists("models/pi_scores.rds")
+if(FALSE) {
   
-  data_estimates_PI <- read_rds("models/data_estimates_PI.rds")
+  pi_scores <- read_rds("models/pi_scores.rds")
   
 } else {
   
@@ -77,199 +268,63 @@ if(file.exists("models/data_estimates_PI.rds")) {
     return(output)
   }
   
+  
+  if(subset_sample == TRUE) {
+    trials_to_process <- all_exclusions_applied_df |>
+      slice_head(n = 500000)   
+    } else {
+    trials_to_process <- all_exclusions_applied_df
+  }
+  
   # bootstrap PI scores 
-  data_estimates_PI <- trial_level_df %>%
-    select(unique_id, trial_consistency, variant, score) %>%
-    mutate(unique_id = as.factor(unique_id),
-           trial_consistency = as.character(trial_consistency),
-           score = as.numeric(score)) %>%
-    group_by(unique_id, variant) %>%
-    do(bootstrap_PI_score(data = .)) %>%
-    ungroup() %>%
+  pi_scores <- trials_to_process |>
+    mutate(session_id = as.factor(SESSION_ID),
+           trial_consistency = as.character(trial_consistency)) |>
+    
+    # ensure a sufficient number of observations per person per measure per trial type
+    group_by(session_id, measure, domain, trial_consistency) |>
+    filter(n() >= 3) |>
+    
+    # remove those who do not have sufficient observations for both trials per measure
+    group_by(session_id, domain, measure) |>
+    filter(n_distinct(trial_consistency) == 2) |>
+    
+    # do bootstrapping scores
+    group_by(session_id, measure, domain) |>
+    do(bootstrap_PI_score(data = .)) |>
+    ungroup() |>
     mutate(sig = ifelse((ci_lower < 0.50 & ci_upper < 0.50) | (ci_lower > 0.50 & ci_upper > 0.50), TRUE, FALSE),
-           ci_width = ci_upper - ci_lower) %>%
-    round_df(3)
+           ci_width = ci_upper - ci_lower) 
   
   # save to disk
-  write_rds(data_estimates_PI, "models/data_estimates_PI.rds", compress = "gz")
+  write_rds(pi_scores, "models/pi_scores.rds")
   
 }
 
+
 ```
 
-
-
-
+# plot distributions 
 
 ```{r}
 
-# read in data
-# I don't know why exactly, but this participant's mouse trajectory data make the mt_measures() function crash.
-# I couldn't figure out why, and in the end it was just easier to do the process of elimination to find out which participant
-# was causing the bug and to exclude them. 
-excluded_participant <- c("ad291")
-
-raw_rt_luuparedirect_df <- read_rds("raw/raw_rt_luuparedirect_data.rds") %>%
-  mutate(variant = "rt")
-raw_rt_niffaredirect_df <- read_rds("raw/raw_rt_niffaredirect_data.rds") %>%
-  mutate(variant = "rt")
-raw_mt_luuparedirect_df <- read_rds("raw/raw_mt_luuparedirect_data.rds") %>%
-  mutate(variant = "mt") %>%
-  filter(!(unique_id %in% excluded_participant))
-raw_mt_niffaredirect_df <- read_rds("raw/raw_mt_niffaredirect_data.rds") %>%
-  mutate(variant = "mt")
+pi_scores |>
+  ggplot() +
+  aes(forcats::fct_reorder(session_id, estimate),
+      estimate,
+      color = sig) +
+  geom_pointrange(aes(ymin = ci_lower,
+                    ymax = ci_upper)) +
+  geom_hline(yintercept = .5) +
+    theme_classic() +
+  theme(axis.ticks.x = element_blank(),
+        axis.text.x = element_blank()) +
+  facet_grid(domain ~ measure,
+             scales = "free_x")
 
 
-```
-
-# join data frames
-
-```{r}
-
-full_raw_rt_data_df <- raw_rt_luuparedirect_df %>%
-  bind_rows(raw_rt_niffaredirect_df)
-
-full_raw_mt_data_df <- raw_mt_luuparedirect_df %>%
-  bind_rows(raw_mt_niffaredirect_df)
+pi_scores |>
+  group_by(measure, domain) |>
+  summarise(proportion_sig = mean(sig, na.rm = TRUE))
 
 ```
-
-
-#
-
-
-```{r}
-
-rt_pep_cleaned_df <- full_raw_rt_data_df %>%
-  
-  # filter out irrelevant components of trial
-  filter(str_detect(sender, "catch") |
-         str_detect(sender, "probe") |
-         str_detect(sender, "error")) %>%
-  
-  # separate sender column into block, trial, and component columns
-  # will return NA for questionnaire-based trials, this is no issue
-  separate(sender_id, into = c("block", "irrelevant value", "trial_num", "component"), sep = "_") %>%
-  
-  # mutate block variable
-  mutate(block = ifelse(block == "10", "practice", 
-                 ifelse(block == "12", "main", "non_pep")),
-         
-         # reformat trial number variable
-         trial_num = as.numeric(trial_num) + 1) %>%
-  
-  # remove practice trials
-  filter(block == "main") %>%
-  
-  # remove extraneous probe/catch components
-  filter(sender == "probe" & !(is.na(duration)) |
-         sender == "catch" & !(is.na(duration))) %>%
-  
-  mutate(relation = case_when(word3 == "ARE" ~ "are",
-                              word2 == "SHOULD" ~ "should"),
-         
-         
-        # I should have just coded this into the csv file used in labjs, but I didn't, so now you have to suffer through me doing it here (sorry...)
-        trial_type = case_when((word2 == "LUUPITES" | word1 == "LUUPITES") & 
-                                      relation == "are" &
-                                      word4 == "DIRECT" & 
-                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") ~ "1",
-                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
-                                      relation == "are" &
-                                      word4 == "DIRECT" & 
-                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") ~ "2",
-                                      
-                                      
-                                      (word2 == "LUUPITES" | word1 == "LUUPITES") & 
-                                      relation == "are" &
-                                      word4 == "KIND" & 
-                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") ~ "1",
-                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
-                                      relation == "are" &
-                                      word4 == "KIND" & 
-                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") ~ "2",
-        
-        
-                                      (word2 == "LUUPITES" | word1 == "LUUPITES") & 
-                                      relation == "are" &
-                                      word4 == "DIRECT" & 
-                                      probe == "FALSE" ~ "1",
-                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
-                                      relation == "are" &
-                                      word4 == "DIRECT" & 
-                                      probe == "FALSE" ~ "2",
-                                      
-                                      
-                                      (word2 == "LUUPITES" | word1 == "LUUPITES") & 
-                                      relation == "are" &
-                                      word4 == "KIND" & 
-                                      probe == "FALSE" &
-                                      condition == "luuparedirect" ~ "consistent",
-                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
-                                      relation == "are" &
-                                      word4 == "KIND" & 
-                                      probe == "FALSE" &
-                                      condition == "niffaredirect" ~ "consistent",
-                                      
-                                      (word2 == "LUUPITES" | word1 == "LUUPITES") & 
-                                      relation == "should" &
-                                      word4 == "DIRECT" & 
-                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") &
-                                      condition == "niffaredirect" ~ "consistent",
-                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
-                                      relation == "should" &
-                                      word4 == "DIRECT" & 
-                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") &
-                                      condition == "luuparedirect" ~ "consistent",
-                                      
-                                      
-                                      (word2 == "LUUPITES" | word1 == "LUUPITES") & 
-                                      relation == "should" &
-                                      word4 == "KIND" & 
-                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") &
-                                      condition == "luuparedirect" ~ "consistent",
-                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
-                                      relation == "should" &
-                                      word4 == "KIND" & 
-                                      (probe == "TRUE" | probe == "??TRUE OR FALSE??") &
-                                      condition == "niffaredirect" ~ "consistent",
-        
-        
-                                      (word2 == "LUUPITES" | word1 == "LUUPITES") & 
-                                      relation == "should" &
-                                      word4 == "DIRECT" & 
-                                      probe == "FALSE" &
-                                      condition == "luuparedirect" ~ "consistent",
-                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
-                                      relation == "should" &
-                                      word4 == "DIRECT" & 
-                                      probe == "FALSE" &
-                                      condition == "niffaredirect" ~ "consistent",
-                                      
-                                      
-                                      (word2 == "LUUPITES" | word1 == "LUUPITES") & 
-                                      relation == "should" &
-                                      word4 == "KIND" & 
-                                      probe == "FALSE" &
-                                      condition == "niffaredirect" ~ "consistent",
-                                      (word2 == "NIFFITES" | word1 == "NIFFITES") & 
-                                      relation == "should" &
-                                      word4 == "KIND" & 
-                                      probe == "FALSE" &
-                                      condition == "luuparedirect" ~ "consistent",
-                                      
-                                      TRUE ~ "inconsistent")) %>%
-  
-  # select only relevant variables
-  select(unique_id, trial_num, trial_type = sender, rt = duration, variant,
-         probe, response, correct, condition, trial_consistency, relation) %>%
-  filter(probe != "??TRUE OR FALSE??") %>%
-  
-  # recode correct column
-  mutate(correct = case_when(correct == TRUE ~ 1, 
-                                      TRUE ~ 0)) 
-
-
-```
-
-

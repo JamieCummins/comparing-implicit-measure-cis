@@ -1,5 +1,5 @@
 ---
-title: "Validity tests for self-reported evaluations, IAT, and AMP"
+title: "Comparing the variances of different implicit measures"
 author: "Ian Hussey & Jamie Cummins"
 output:
   html_document:
@@ -9,6 +9,14 @@ output:
     toc: yes
     toc_float: yes
 ---
+
+# TODO
+
+- NA
+
+# Arugment:
+
+decent measure needs three properties: (1) can detect unambiguous preferences (preference for self over others), (2) some degree of variance 
 
 ```{r include=FALSE}
 
@@ -45,744 +53,275 @@ format_p_value <- function(p){
   return(p_formatted)
 }
 
+round_df <- function(x, ndigits = 3) {
+  mutate_if(x, is.numeric, janitor::round_half_up, digits = ndigits)
+}
+
 ```
 
-# TODO
-
-- TODO: how to make the Levene's followup tests one-tailed? Our prediction is directional: low < high. The above significant result mischaracterizes whether it supports our hypotheses.
-- Have we fucked up anywhere? why is the AMP so bad here? I didn't think it would be WORSE in the low condition than the high.
-- Add performance exclusions to data processing before we get ahead of ourselves. 
-- In any next study, add self exclusion question at end.
-
-- New design: 2 (category/response option location: between) X 2 (attitude domain: between) X 3 (measure SR/IAT/AMP: within) design. Skip the between domain correlational/SEM analyses for the moment. analyses: 
-  - Responses should be under the stimulus control of category and label stimuli. Using pos-neg domain only;
-    - Means should differ between the category/response option location conditions.
-    - compare differences in means between measures using cohen's d.
-  - Using both domains: variances should differ between domains, and likely differ between measures.
-  - Using the dogcats domain only, correlations between ...
-
-# Simulated data: Analysis of variances between tasks and conditions
-
-## Simulated data
-
-For testing.
+# Data
 
 ```{r}
 
-n_participants <- 100
+data_processed <- read_rds("../../data/processed/data_processed.rds") |>
+  rename(subject = session_id) |>
+  mutate(measure = fct_relevel(toupper(measure), "IAT", "BIAT", "SIAT", "AMP", "GNAT", "EPT"),
+         estimate_absolute = abs(estimate))
 
-# for variance analysis
-data_simulated <- 
-  tibble(
-    SR_low   = rnorm(n = n_participants, mean = 0.50, sd = .1),
-    IAT_low  = rnorm(n = n_participants, mean = 0.50, sd = .2),
-    AMP_low  = rnorm(n = n_participants, mean = 0.50, sd = .3),
-    SR_high  = rnorm(n = n_participants, mean = 0.50, sd = .3),
-    IAT_high = rnorm(n = n_participants, mean = 0.50, sd = .3),
-    AMP_high = rnorm(n = n_participants, mean = 0.50, sd = .3)
-  ) |>
-  rownames_to_column(var = "subject") |>
-  pivot_longer(cols = !subject,
-               names_to = c("task", "condition"),
-               names_pattern = "(.*)_(.*)",
-               values_to = "pomp") |>
-  mutate(task = fct_relevel(task, "SR", "IAT", "AMP"),
-         pomp = case_when(pomp < 0 ~ 0,
-                          pomp > 1 ~ 1,
-                          TRUE ~ pomp))
+data_processed_wide <- data_processed |>
+  select(subject, domain, measure, estimate) |>
+  arrange(domain, measure) |>
+  pivot_wider(names_from = c("domain", "measure"),
+              values_from = estimate)
 
 ```
 
-## Compare variances between conditions for each task
-
-F test vs Levene's test:
-
-- F test can only be used to compare two variances, whereas Levene's test can compare multiple factors (i.e. can provide an omnibus test).
-- F test makes strict assumption of normality which will likely be violated for AMP data. However, one could argue that this assumption is not ours but common to the analysis of AMP data in the literature?
-- F test benefits from providing estimates of effect size (i.e., the ratio between the samples' variances). This can be used to speak to magnitudes of differences, and compare the three tasks. However, this relies on the assumption of normality which is likely to be violated for the AMP data.
-
-Analytic strategy given pros and cons of each:
-
-1. An omnibus Levene's test will be used to test for differences between tasks * conditions. 
-2. Follow-up Levene's tests will compare conditions for each task and tasks for each condition. These will be used for hypothesis tests:
-  - The validity of each task as a measures of evaluations relies on it demonstrating differences between the conditions.
-3. F tests will compare conditions for each task. 
-  - The confidence intervals for each task will be used to infer the relative validity of each task as a measure of evaluations. 
-
-### Levene's test
-
-I.e., absolute values of the deviations from the median. Levene's original test uses the mean, and this more robust version using the median is technically the Brown-Forsythe test. However, this name is less well known, and Levene's test is often a catchall (including in the function name).
-
-##### Omnibus test to compare tasks*conditions
+# Correlations
 
 ```{r}
 
-data_simulated |>
-  car::leveneTest(pomp ~ condition * task, 
-                  data = _, 
-                  centre = median) |>
-  tidy()
+data_processed_wide |>
+  select(-subject) |>
+  cor(method = "spearman", use = "pairwise.complete.obs") |>
+  round(2)
 
 ```
 
-#### Follow-up tests to compare conditions for each task
-
-```{r}
-
-results_levenes_test_pairwise <- data_simulated |> 
-  group_by(task) |>
-  do(broom::tidy(car::leveneTest(pomp ~ condition, data = ., center = median))) |>
-  mutate(statistic = janitor::round_half_up(statistic, 2)) |>
-  select(task, statistic, df, df_residual = df.residual, p = p.value) |>
-  add_significance(p.col = "p")
-
-results_levenes_test_pairwise
-
-```
-
-#### Plot
-
-```{r}
-
-# data wrangling
-data_summary <- data_simulated |>
-  group_by(task, condition) |>
-  summarize(mean = mean(pomp),
-            sd = sd(pomp),
-            variance = var(pomp),
-            .groups = "drop")
-
-# plot
-p1 <- 
-  ggplot(data_summary, aes(x = task, y = variance, fill = condition, shape = condition)) +
-  geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
-  xlab("Task") +
-  ylab("Variance") +
-  theme_bw() +
-  theme(legend.position = "right") +
-  scale_fill_viridis_d(begin = 0.3, 
-                       end = 0.7,
-                       name = "Expected variance condition", 
-                       labels = c("low" = "Low (pleasant vs unpleasant images)", 
-                                  "high" = "High (dogs vs cats)")) +
-  scale_shape_discrete(name = "Expected variance condition", 
-                       labels = c("low" = "Low (pleasant vs unpleasant images)", 
-                                  "high" = "High (dogs vs cats)")) +
-  scale_x_discrete(labels = c("IAT" = "IAT", 
-                              "AMP" = "AMP",
-                              "SR" = "Self report"))
-
-p1 + 
-  geom_signif(xmin = c(0.78, 1.78, 2.78), 
-              xmax = c(1.22, 2.22, 3.22), 
-              y_position = 0.088,
-              tip_length = .02, 
-              # annotation = format_p_value(results_levenes_test_pairwise$p)) +
-              annotation = results_levenes_test_pairwise$p.signif) +
-  coord_cartesian(ylim = c(0, 0.09))
-
-```
-
-### Using an F test to compare tasks
-
-```{r}
-
-results_f_test <- data_simulated |> 
-  group_by(task) |>
-  do(broom::tidy(var.test(pomp ~ condition, data = .))) |>
-  # mutate(estimate = janitor::round_half_up(estimate, 2),
-  #        statistic = janitor::round_half_up(statistic, 2),
-  #        conf.low = janitor::round_half_up(conf.low, 2),
-  #        conf.high = janitor::round_half_up(conf.high, 2)) |>
-  select(task, method, estimate, ci_lower = conf.low, ci_upper = conf.high, 
-         statistic, df_numerator = num.df, denominator_df = den.df, p = p.value) |>
-  add_significance(p.col = "p")
-
-results_f_test
-
-```
-
-#### Plot
-
-```{r}
-
-ggplot(results_f_test, aes(fct_rev(task), estimate)) +
-  geom_hline(yintercept = 1, linetype = "dotted") +
-  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
-  geom_point() +
-  coord_flip() +
-  xlab("Task") +
-  ylab("Variance ratio") +
-  theme_bw() +
-  scale_x_discrete(labels = c("IAT" = "IAT", 
-                              "AMP" = "AMP",
-                              "SR" = "Self report"))
-
-```
-
-
-# Real data: Analysis of variances between tasks and conditions
-
-## Narrative
-
-This makes the point that the AMP is not a good measure of *relative preference* as the effect itself does not form a relative score, whereas the IAT does (almost inflexibly so). Correlations between scores on trials involving different types of primes are not been given much attention in the past. Data could be combined with that from the BRM paper or simply the BRM data used. IA AMP data shows that the correlation is only negative (as expected) on the subset of aware trials. So its pick one, implicit or measure of evaluations. 
-
-The analysis of mean difference from the zero point argues the AMP is not a good measure of *evaluation* as group level mean effects don't clearly show a simple effect for "pleasant images are more positive than unpleasant images" compared to IAT and self report. Data could be supplemented with that from the BRM paper (and our unpublished race AMPs?) to show that many expected mean effects are often not observed and are weak. The BRM paper data also shows that effects that are observed are on the aware trials. 
-
-The variance analyses show that the AMP is not a good measure of evaluations because the degree of variance in its effects does not fluctuate with individual differences in the attitudes being studied. [questions remain about whether to make the SR absolute or relative measures. depends on domain. pilot?]
-
-Finally, these differences between AMP and IAT/SR cannot be simply chalked up to the thing being measured (some form of implicit attitude) instead of the thing measuring because the correlations among the measures don't reflect an implicit-explicit distinction, just a good-bad measure distinction (networks).
-
-what about data from Bar-anan and Nosek's comparing 7 measures paper?
-
-## Data
-
-```{r}
-
-data_processed <- read_csv("../data/processed/data_processed.csv") |>
-  filter(exclude == FALSE) |>
-  rename(SR_high  = SR_high_pomp,
-         SR_low   = SR_low_pomp,
-         IAT_high = IAT_high_pomp,
-         IAT_low  = IAT_low_pomp,
-         AMP_high = AMP_high_pomp,
-         AMP_low  = AMP_low_pomp)
-
-data_variance_analysis <- data_processed |>
-  select(subject,
-         SR_high,
-         SR_low,
-         IAT_high,
-         IAT_low,
-         AMP_high,
-         AMP_low) |>
-  pivot_longer(cols = !subject,
-               names_to = c("task", "condition"),
-               names_pattern = "(.*)_(.*)",
-               values_to = "pomp") |>
-  mutate(task = fct_relevel(task, "SR", "IAT", "AMP"),
-         pomp = case_when(pomp < 0 ~ 0,
-                          pomp > 1 ~ 1,
-                          TRUE ~ pomp))
-
-data_absolute <- data_processed |>
-  select(subject, 
-         SR_high, 
-         IAT_high, 
-         AMP_high, 
-         SR_low, 
-         IAT_low, 
-         AMP_low) |>
-  mutate(SR_high = abs(SR_high-0.5),
-         IAT_high = abs(IAT_high-0.5),
-         AMP_high = abs(AMP_high-0.5),
-         SR_low = abs(SR_low-0.5),
-         IAT_low = abs(IAT_low-0.5),
-         AMP_low = abs(AMP_low-0.5))
-
-data_variance_analysis_absolute <- data_absolute |>
-  select(subject,
-         SR_high,
-         SR_low,
-         IAT_high,
-         IAT_low,
-         AMP_high,
-         AMP_low) |>
-  pivot_longer(cols = !subject,
-               names_to = c("task", "condition"),
-               names_pattern = "(.*)_(.*)",
-               values_to = "pomp_absolute") |>
-  mutate(task = fct_relevel(task, "SR", "IAT", "AMP"),
-         pomp_absolute = case_when(pomp_absolute < 0 ~ 0,
-                                   pomp_absolute > 1 ~ 1,
-                                   TRUE ~ pomp_absolute))
-
-```
+# Analysis of variances between measures and domains
 
 ## Distributions
 
-Why does basically noone show an AMP effect? have we scored it right? positive-negative amp effects could be demonstrated in our previous sets of studies, right?
-
 ```{r}
 
-round_df <- function(x, ndigits = 3) {
-  
-  mutate_if(x, is.numeric, janitor::round_half_up, digits = ndigits)
-  
-}
-
-data_variance_analysis %>%
-  group_by(task, condition) %>%
-  do(tidy(t.test(x = .$pomp, mu = 0.50))) |>
+data_processed %>%
+  group_by(domain, measure) %>%
+  do(tidy(t.test(x = .$estimate, mu = 0.50))) |>
   round_df(4) |>
-  select(task, condition, estimate, conf.low, conf.high, p.value)
+  select(domain, measure, estimate, conf.low, conf.high, p.value)
 
-data_variance_analysis_absolute %>%
-  group_by(task, condition) %>%
-  do(tidy(t.test(x = .$pomp_absolute))) |>
-  round_df(4) |>
-  select(task, condition, estimate, conf.low, conf.high, p.value)
+# data_processed %>%
+#   group_by(measure, domain) %>%
+#   do(tidy(t.test(x = .$estimate_absolute))) |>
+#   round_df(4) |>
+#   select(measure, domain, estimate, conf.low, conf.high, p.value)
 
 ```
 
 ```{r}
 
-ggplot(data_variance_analysis, aes(pomp, fill = condition)) +
+ggplot(data_processed, aes(estimate)) +
+  geom_vline(xintercept = 0.5, linetype = "dotted") +
   geom_density(adjust = 2, alpha = 0.3) +
-  facet_wrap( ~ task, scales = "free_y")
+  facet_grid(measure ~ domain, scales = "free_y")
 
-ggplot(data_variance_analysis_absolute, aes(pomp_absolute, fill = condition)) +
-  geom_density(adjust = 2, alpha = 0.3) +
-  facet_wrap( ~ task, scales = "free_y")
-
-```
-
-## Distribution of effects and mean responses on AMP
-
-```{r}
-
-ggplot(data_processed, aes(AMP_mean_response_dogscats, AMP_mean_response_posneg)) +
-  geom_point() 
-
-data_processed |>
-  select(AMP_dogscats, AMP_posneg) |>
-  gather(domain, AMP_effect) |>
-  ggplot(aes(AMP_effect, fill = domain)) +
-  geom_density(adjust = 2, alpha = 0.3) 
-
-data_processed |>
-  select(AMP_mean_response_dogscats, AMP_mean_response_posneg) |>
-  gather(domain, AMP_mean_response) |>
-  ggplot(aes(AMP_mean_response, fill = domain)) +
-  geom_density(adjust = 2, alpha = 0.3) 
-
-data_processed |>
-  select(AMP_mean_response_dogscats, AMP_mean_response_posneg) |>
-  gather() |>
-  group_by(key) |>
-  summarize(proportion_extreme = round(mean(value > .975 | value < 0.025), 3))
+# ggplot(data_processed, aes(estimate_absolute)) +
+#   geom_vline(xintercept = 0.5, linetype = "dotted") +
+#   geom_density(adjust = 2, alpha = 0.3) +
+#   facet_grid(measure ~ domain, scales = "free_y")
 
 ```
 
-- The above represents the proportion of extreme evaluative responses (i.e., >.975 of responses were positive or >.975 were negative) emitted within each AMP, agnostic to prime type. 
-- There is a really large proportion of people who respond with the same response on >95%% of trials, regardless of prime type or prime exemplar (24% on dogscats AMP, 6% on posneg). So, these people respond as if they (dis)like every target(/prime). 
-  - The issue is its not possible to discriminate between the AMP working "perfectly" in these participants (i.e., they perfectly ignore the primes and (dis)like Chinese characters generally) and "not at all" (i.e., they ignore the primes, targets, and instructions entirely, and simply press a single key repeatedly until the task ends in order to escape the task/get paid).
-  - Why the difference in rate between the task? Confounded by order of presentation (posneg then dogscats) and location of response options (positive always on right hand side/key).
-  
-### comparing current data with BRM paper data - posneg AMP
-
-```{r}
-
-data_combined_across_studies <- 
-  bind_rows(
-    data_processed |>
-      mutate(domain = "Valence",
-             study = "new pilot study") |>
-      select(study, 
-             domain, 
-             AMP_effect = AMP_posneg,
-             AMP_mean_response = AMP_mean_response_posneg),
-    # from the BRM meta
-    data_participant_level |>
-      filter(AMP_domain == "Valence") |>
-      mutate(AMP_effect = (AMP_effect/2)+0.5, # put on 0 to 1 scale used in other study
-             study = "BRM paper",
-             domain = "Valence") |>
-      select(study, 
-             domain, 
-             AMP_effect,
-             AMP_mean_response)
-  ) |>
-  mutate(abs_AMP_effect = ifelse(AMP_effect < 0.5, 1-AMP_effect, AMP_effect))
-
-
-ggplot(data_combined_across_studies, aes(AMP_effect, fill = study)) +
-  geom_vline(xintercept = 0.50, linetype = "dotted") +
-  geom_density(adjust = 2, alpha = 0.3) 
-
-# ggplot(data_combined_across_studies, aes(abs_AMP_effect, fill = study)) +
-#   geom_density(adjust = 2, alpha = 0.3)
-
-ggplot(data_combined_across_studies, aes(AMP_mean_response, fill = study)) +
-  geom_vline(xintercept = 0.50, linetype = "dotted") +
-  geom_density(adjust = 2, alpha = 0.3) 
-
-data_combined_across_studies |>
-  group_by(study) |>
-  summarize(proportion_extreme = round(mean(AMP_mean_response > .975 | 
-                                              AMP_mean_response < 0.025), 3))
-
-
-```
-
-## Correlations
-
-```{r}
-
-data_processed |>
-  mutate(abs_AMP_mean_response_dogscats = 
-           ifelse(AMP_mean_response_dogscats < 0.5, 
-                  1 - AMP_mean_response_dogscats,
-                  AMP_mean_response_dogscats),
-         abs_AMP_dogscats = 
-           ifelse(AMP_dogscats < 0.5, 
-                  1 - AMP_dogscats,
-                  AMP_dogscats)) |>
-  select(AMP_dogscats, 
-         abs_AMP_dogscats, 
-         AMP_mean_response_dogscats, 
-         abs_AMP_mean_response_dogscats) |>
-  cor(method = "spearman") |>
-  round(2)
-
-data_processed |>
-  select(SR_dogscats, IAT_D_score_dogscats, AMP_dogscats,
-         SR_posneg, IAT_D_score_posneg, AMP_posneg) |>
-  cor(method = "spearman") |>
-  round(2)
-
-cors_tests2 <- data_processed |>
-  cor_test(SR_dogscats, IAT_D_score_dogscats, AMP_dogscats, method = "spearman")
-
-cors_tests3 <- data_processed |>
-  cor_test(SR_posneg, IAT_D_score_posneg, AMP_posneg, method = "spearman")
-
-library(bootnet)
-#library(qgraph)
-
-data_processed |>
-  select(SR = SR_dogscats, IAT = IAT_D_score_dogscats, AMP = AMP_dogscats) |>
-  estimateNetwork(default = "cor", corMethod = "spearman") |>
-  plot(layout = "circle")
-
-data_processed |>
-  select(SR = SR_posneg, IAT = IAT_D_score_posneg, AMP = AMP_posneg) |>
-  estimateNetwork(default = "cor", corMethod = "spearman") |>
-  plot(layout = "circle")
-
-```
-
-- why do these differ?
-
-## Correlations among trial types
-
-```{r fig.height=4, fig.width=4}
-
-ggplot(data_processed, aes(AMP_posneg_positive, AMP_posneg_negative)) +
-  geom_jitter() +
-  geom_smooth(method = "lm", fullrange = TRUE) 
-
-ggplot(data_processed, aes(IAT_D_score_posneg_category1, IAT_D_score_posneg_category2*-1)) +
-  geom_jitter() +
-  geom_smooth(method = "lm", fullrange = TRUE) 
-
-```
-
-## Compare variances between conditions for each task
+## Compare variances between domains for each measure
 
 F test vs Levene's test:
 
 - F test can only be used to compare two variances, whereas Levene's test can compare multiple factors (i.e. can provide an omnibus test).
 - F test makes strict assumption of normality which will likely be violated for AMP data. However, one could argue that this assumption is not ours but common to the analysis of AMP data in the literature?
-- F test benefits from providing estimates of effect size (i.e., the ratio between the samples' variances). This can be used to speak to magnitudes of differences, and compare the three tasks. However, this relies on the assumption of normality which is likely to be violated for the AMP data.
+- F test benefits from providing estimates of effect size (i.e., the ratio between the samples' variances). This can be used to speak to magnitudes of differences, and compare the three measures. However, this relies on the assumption of normality which is likely to be violated for the AMP data.
 
 Analytic strategy given pros and cons of each:
 
-1. An omnibus Levene's test will be used to test for differences between tasks * conditions. 
-2. Follow-up Levene's tests will compare conditions for each task and tasks for each condition. These will be used for hypothesis tests:
-  - The validity of each task as a measures of evaluations relies on it demonstrating differences between the conditions.
-3. F tests will compare conditions for each task. 
-  - The confidence intervals for each task will be used to infer the relative validity of each task as a measure of evaluations. 
+1. An omnibus Levene's test will be used to test for differences between measures * domains. 
+2. Follow-up Levene's tests will compare domains for each measure and measures for each domain. These will be used for hypothesis tests:
+  - The validity of each measure as a measures of evaluations relies on it demonstrating differences between the domains.
+3. F tests will compare domains for each measure. 
+  - The confidence intervals for each measure will be used to infer the relative validity of each measure as a measure of evaluations. 
 
 ### Levene's test
 
 I.e., absolute values of the deviations from the median. Levene's original test uses the mean, and this more robust version using the median is technically the Brown-Forsythe test. However, this name is less well known, and Levene's test is often a catchall (including in the function name).
 
-##### Omnibus test to compare tasks*conditions
+##### Omnibus test to compare measures*domains
 
 ```{r}
 
-data_variance_analysis |>
-  car::leveneTest(pomp ~ condition * task, 
+data_processed |>
+  car::leveneTest(estimate ~ domain * measure, 
                   data = _, 
                   centre = median) |>
   tidy()
 
 ```
 
-#### Follow-up tests to compare conditions for each task
+#### Follow-up tests to compare measures within each domain
 
 ```{r}
 
-results_levenes_test_pairwise <- data_variance_analysis |> 
-  group_by(task) |>
-  do(broom::tidy(car::leveneTest(pomp ~ condition, data = ., center = median))) |>
+results_levenes_test_by_domain <- data_processed |> 
+  group_by(domain) |>
+  do(broom::tidy(car::leveneTest(estimate ~ measure, data = ., center = median))) |>
   mutate(statistic = janitor::round_half_up(statistic, 2)) |>
-  select(task, statistic, df, df_residual = df.residual, p = p.value) |>
+  select(domain, statistic, df, df_residual = df.residual, p = p.value) |>
   add_significance(p.col = "p")
 
-results_levenes_test_pairwise
+results_levenes_test_by_domain
 
 ```
 
-#### Plot
+
+#### Table of variances by domain and measure
+
+```{r}
+
+data_processed |> 
+  group_by(domain, measure) |>
+  summarize(var = round(var(estimate), 3)) |>
+  pivot_wider(names_from = domain,
+              values_from = var)
+
+```
+
+#### Plot of variances by domain and measure
 
 ```{r}
 
 # data wrangling
-data_summary <- data_variance_analysis |>
-  group_by(task, condition) |>
-  summarize(mean = mean(pomp),
-            sd = sd(pomp),
-            variance = var(pomp),
+data_summary <- data_processed |>
+  group_by(measure, domain) |>
+  summarize(mean = mean(estimate),
+            sd = sd(estimate),
+            variance = var(estimate),
             .groups = "drop")
 
 # plot
-p1 <- 
-  ggplot(data_summary, aes(x = task, y = variance, fill = condition, shape = condition)) +
+p1 <-
+  ggplot(data_summary, aes(x = measure, y = variance, fill = domain)) +
   geom_bar(stat = "identity", position = position_dodge(width = 0.9)) +
-  xlab("Task") +
   ylab("Variance") +
   theme_bw() +
   theme(legend.position = "right") +
-  scale_fill_viridis_d(begin = 0.3, 
+  scale_fill_viridis_d(begin = 0.3,
                        end = 0.7,
-                       name = "Expected variance condition", 
-                       labels = c("low" = "Low (pleasant vs unpleasant images)", 
-                                  "high" = "High (dogs vs cats)")) +
-  scale_shape_discrete(name = "Expected variance condition", 
-                       labels = c("low" = "Low (pleasant vs unpleasant images)", 
-                                  "high" = "High (dogs vs cats)")) +
-  scale_x_discrete(labels = c("IAT" = "IAT", 
-                              "AMP" = "AMP",
-                              "SR" = "Self report"))
+                       name = "Domain") +
+  scale_x_discrete(name = "Measure")
 
-p1 + 
-  geom_signif(xmin = c(0.78, 1.78, 2.78), 
-              xmax = c(1.22, 2.22, 3.22), 
-              y_position = 0.088,
-              tip_length = .02, 
-              # annotation = format_p_value(results_levenes_test_pairwise$p)) +
-              annotation = results_levenes_test_pairwise$p.signif) +
-  coord_cartesian(ylim = c(0, 0.09))
+p1 
+# + 
+#   geom_signif(xmin = c(0.78, 1.78, 2.78), 
+#               xmax = c(1.22, 2.22, 3.22), 
+#               y_position = 0.088,
+#               tip_length = .02, 
+#               # annotation = format_p_value(results_levenes_test_pairwise$p)) +
+#               annotation = results_levenes_test_pairwise$p.signif) +
+#   coord_cartesian(ylim = c(0, 0.09))
 
 ```
 
-### Using an F test to compare tasks
+### Using F tests to compare domains pairwise
+
+We don't attempt to address the ratio of true variance to error variance within any measure/domain, just examine the relative amount of variance between measures and domains. Some systematic differences between domains is useful though, which we explore here:
 
 ```{r}
 
-results_f_test <- data_variance_analysis |> 
-  group_by(task) |>
-  do(broom::tidy(var.test(pomp ~ condition, data = .))) |>
-  # mutate(estimate = janitor::round_half_up(estimate, 2),
-  #        statistic = janitor::round_half_up(statistic, 2),
-  #        conf.low = janitor::round_half_up(conf.low, 2),
-  #        conf.high = janitor::round_half_up(conf.high, 2)) |>
-  select(task, method, estimate, ci_lower = conf.low, ci_upper = conf.high, 
-         statistic, df_numerator = num.df, denominator_df = den.df, p = p.value) |>
-  add_significance(p.col = "p")
+compare_variances_domain <- function(dat, domain_1, domain_2){
+  
+  dat |> 
+    filter(domain %in% c(domain_1, domain_2)) |>
+    group_by(measure) |>
+    do(broom::tidy(var.test(estimate ~ domain, data = .))) |>
+    mutate(domain_1 = domain_1,
+           domain_2 = domain_2) |>
+    select(domain_1, domain_2, 
+           measure, method, estimate, ci_lower = conf.low, ci_upper = conf.high, 
+           statistic, df_numerator = num.df, denominator_df = den.df, p = p.value) 
+  
+}
+
+results_f_test <- 
+  bind_rows(
+    compare_variances_domain(data_processed, "politics", "self"),
+    compare_variances_domain(data_processed, "politics", "race"),
+    compare_variances_domain(data_processed, "race", "self")
+  ) |>
+  mutate(p_adjusted = p.adjust(p, "holm")) |>
+  rstatix::add_significance(p.col = "p_adjusted") |>
+  #select(domain_1, domain_2, measure, p_adjusted.signif) |>
+  arrange(measure) |>
+  mutate(domains = paste(domain_1, domain_2, sep = " / "))
 
 results_f_test
 
 ```
 
-#### Plot
-
 ```{r}
 
-ggplot(results_f_test, aes(fct_rev(task), estimate)) +
+# ggplot(results_f_test, aes(fct_rev(measure), estimate, group = domains)) +
+#   geom_hline(yintercept = 1, linetype = "dotted") +
+#   geom_linerange(aes(ymin = ci_lower, ymax = ci_upper),
+#                  position = position_dodge(width = 0.3)) +
+#   geom_point(position = position_dodge(width = 0.3)) +
+#   coord_flip() +
+#   xlab("measure") +
+#   ylab("Variance ratio") +
+#   theme_bw()
+#   # scale_x_discrete(labels = c("IAT" = "IAT", 
+#   #                             "AMP" = "AMP",
+#   #                             "SR" = "Self report"))
+
+ggplot(results_f_test, aes(fct_rev(measure), estimate)) +
   geom_hline(yintercept = 1, linetype = "dotted") +
   geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
   geom_point() +
   coord_flip() +
-  xlab("Task") +
+  xlab("Measure") +
   ylab("Variance ratio") +
   theme_bw() +
-  scale_x_discrete(labels = c("IAT" = "IAT", 
-                              "AMP" = "AMP",
-                              "SR" = "Self report"))
+  facet_wrap(~ domains)
 
 ```
 
-
-## Analysis of difference in mean from neutral point in posneg domain
-
-A basic test of validity is whether the measure can pick up on the group level evaluation of pleasant images as positive relative to unpleasant images being negative
+### Using F tests to compare measures pairwise
 
 ```{r}
 
-results_diff_zero <- data_processed |>
-  select(subject, SR_posneg, IAT_D_score_posneg, AMP_posneg) |>
-  mutate(AMP_posneg = AMP_posneg - 0.5,
-         SR_posneg = SR_posneg - 4) |>
-  pivot_longer(cols = !subject,
-               names_to = "task",
-               values_to = "score") |>
-  group_by(task) %>%
-  do(tidy(t.test(x = .$score))) %>%
-  do(effectsize::t_to_d(t = .$statistic, df_error = .$parameter, paired = FALSE))
+compare_variances <- function(dat, measure_1, measure_2){
+  
+  dat |> 
+    filter(measure %in% c(measure_1, measure_2)) |>
+    group_by(domain) |>
+    do(broom::tidy(var.test(estimate ~ measure, data = .))) |>
+    mutate(measure_1 = measure_1,
+           measure_2 = measure_2) |>
+    select(measure_1, measure_2, 
+           domain, method, estimate, ci_lower = conf.low, ci_upper = conf.high, 
+           statistic, df_numerator = num.df, denominator_df = den.df, p = p.value) 
+  
+}
 
-results_diff_zero
+results_f_test <- 
+  bind_rows(
+    compare_variances(data_processed, "IAT", "AMP"),
+    compare_variances(data_processed, "IAT", "GNAT"),
+    compare_variances(data_processed, "IAT", "EPT"),
+    
+    compare_variances(data_processed, "AMP", "IAT"),
+    compare_variances(data_processed, "AMP", "GNAT"),
+    compare_variances(data_processed, "AMP", "EPT"),
+    
+    compare_variances(data_processed, "GNAT", "IAT"),
+    compare_variances(data_processed, "GNAT", "AMP"),
+    compare_variances(data_processed, "GNAT", "EPT"),
+    
+    compare_variances(data_processed, "GNAT", "IAT"),
+    compare_variances(data_processed, "GNAT", "AMP"),
+    compare_variances(data_processed, "GNAT", "EPT")
+  ) |>
+  mutate(p_adjusted = p.adjust(p, "holm")) |>
+  rstatix::add_significance(p.col = "p_adjusted") |>
+  select(measure_1, measure_2, domain, p_adjusted.signif)
 
-ggplot(results_diff_zero, aes(fct_rev(task), d)) +
-  geom_bar(stat = "identity", linetype = "dotted") +
-  geom_linerange(aes(ymin = CI_low, ymax = CI_high)) +
-  geom_point() +
-  #coord_flip() +
-  xlab("Task") +
-  ylab("Cohen's d for one-sample t-test\nbetween mean and neutral point") +
-  theme_bw() +
-  scale_x_discrete(labels = c("IAT_D_score_posneg" = "IAT", 
-                              "AMP_posneg" = "AMP",
-                              "SR_posneg" = "Self report"))
-
-```
-
-- should this be a between groups design instead, comparing categories mappings between left and right? Effect is probably artificially boosted by comparing against a static point. ie use native scores for this analysis, then reverse score one condition and use for other analyses.
-
-## SEM
-
-### Native dogscats compare models
-
-```{r}
-
-model_1 <- 
-  "
-  eval =~ SR_posneg + IAT_D_score_posneg + AMP_posneg
-  " 
-
-model_2 <- 
-  "
-  eval_imp =~ IAT_D_score_posneg + AMP_posneg
-  eval_exp =~ SR_posneg
-  " 
-
-model_3 <- 
-  "
-  eval =~ SR_posneg + IAT_D_score_posneg
-  other =~ AMP_posneg
-  " 
-
-fit_1 <- sem(model = model_1, data = data_processed)
-fit_2 <- sem(model = model_2, data = data_processed)
-fit_3 <- sem(model = model_3, data = data_processed)
-
-summary(fit_1)
-summary(fit_2)
-summary(fit_3)
-
-fitmeasures(fit_1)
-fitmeasures(fit_2)
-fitmeasures(fit_3)
+results_f_test
 
 ```
 
-### Native
-
-```{r}
-
-model <- 
-  "
-  evaluations_high =~ SR_high + IAT_high + AMP_high
-  evaluations_low  =~ SR_low  + IAT_low  + AMP_low
-  evaluations_high ~~ 0*evaluations_low
-  SR_high ~~ SR_low
-  IAT_high ~~ IAT_low
-  AMP_high ~~ AMP_low
-  " 
-
-fit <- sem(model = model, 
-           data = data_processed)
-
-summary(fit)
-
-```
-
-### Absolute
-
-```{r}
-
-model <- 
-  "
-  evaluations_high =~ SR_high + IAT_high + AMP_high
-  evaluations_low  =~ SR_low  + IAT_low  + AMP_low
-  evaluations_high ~~ 0*evaluations_low
-  SR_high ~~ SR_low
-  IAT_high ~~ IAT_low
-  AMP_high ~~ AMP_low
-  " 
-
-fit <- sem(model = model, data = data_absolute)
-
-summary(fit)
-
-```
-
-
-## Analysis of correlations within the high-variance domain
-
-TODO
-
-```{r}
-
-
-
-```
-
-# Old
-
-These just don't convey the point very well. Maybe some raincloud plots of actual data, with means and CIs using SDs? These don't directly connect to hypothesis tests, but would they be illustrative?
-
-```{r}
-
-# data wrangling
-data_summary <- data_variance_analysis |>
-  group_by(task, condition) |>
-  summarize(mean = mean(pomp),
-            sd = sd(pomp),
-            variance = var(pomp),
-            .groups = "drop")
-
-# option 1
-ggplot(data_summary, aes(x = task, y = mean, color = condition, shape = condition)) +
-  geom_linerange(aes(ymin = mean - sd, ymax = mean + sd),
-                 position = position_dodge(width = 0.4)) +
-  geom_point(position = position_dodge(width = 0.4)) +
-  coord_flip() +
-  xlab("Task") +
-  ylab("Percent of Maximum Possible Score (POMP)") +
-  theme_bw() +
-  theme(legend.position = "top") +
-  scale_color_viridis_d(begin = 0.3, 
-                        end = 0.7,
-                        name = "Condition\n(Attiude domain)", 
-                        labels = c("high" = "High expected variance (dogs vs cats)", 
-                                   "low"  = "Low expected variance (pleasant vs unpleasant images)")) +
-  scale_shape_discrete(name = "Condition\n(Attiude domain)", 
-                       labels = c("high" = "High expected variance (dogs vs cats)", 
-                                  "low"  = "Low expected variance (pleasant vs unpleasant images)"))
-
-# option 2
-ggplot(data_summary, aes(x = condition, y = mean, color = task, shape = task)) +
-  geom_linerange(aes(ymin = mean - sd, ymax = mean + sd),
-                 position = position_dodge(width = 0.4)) +
-  geom_point(position = position_dodge(width = 0.4)) +
-  coord_flip() +
-  xlab("Condition\n(Attitude domain)") +
-  ylab("Percent of Maximum Possible Score (POMP)") +
-  theme_bw() +
-  theme(legend.position = "right") +
-  scale_color_viridis_d(begin = 0.3, 
-                        end = 0.7,
-                        name = "Task",
-                        labels = c("AMP", "IAT", "Self-report"),
-                        guide = guide_legend(reverse = TRUE)) +
-  scale_shape_discrete(name = "Task",
-                       labels = c("AMP", "IAT", "Self-report"),
-                       guide = guide_legend(reverse = TRUE)) +
-  scale_x_discrete(labels = c("low" = "Low expected variance\n(pleasant vs unpleasant images)", 
-                              "high" = "High expected variance\n(dogs vs cats)"))
-
-```
 

@@ -168,9 +168,6 @@ critical_trials_df <- trial_level_tasks_labelled_df |>
                       measure %in% c("amp") ~ TRIAL_ERROR,
                       measure %in% c("ept") ~ abs(TRIAL_ERROR - 1)))
 
-view_df <- critical_trials_df |>
-  filter(measure == "ept")
-
 ```
 
 
@@ -197,6 +194,9 @@ participants_after_session_level_exclusions <- critical_trials_df |>
   ) |>
   select(SESSION_ID, measure, domain)
   
+participants_after_session_level_exclusions |>
+  count(measure, domain)
+
 ```
 
 ## at trial level
@@ -215,12 +215,9 @@ all_exclusions_applied_df <- critical_trials_df |>
     (measure %in% c("ept", "amp"))
   )
 
-all_exclusions_applied_df |>
-  filter(measure == "ept")
-
 ```
 
-# compute scores
+# compute scores from zero 
 
 ```{r}
 
@@ -264,7 +261,7 @@ if(FALSE) {
     results <- boot::boot.ci(fit, conf = 0.95, type = c("norm"))
     
     output <- 
-      tibble(method   = c("normal"),
+      tibble(method   = c("bca"),
              estimate = fit$t0,
              ci_lower = c(results$normal[2]),
              ci_upper = c(results$normal[3]))
@@ -307,28 +304,21 @@ if(FALSE) {
 
 ```
 
-# plot distributions 
+
+# compute discriminability between participants
 
 ```{r}
 
-pi_scores |>
-  ggplot() +
-  aes(forcats::fct_reorder(session_id, estimate),
-      estimate,
-      color = sig) +
-  geom_pointrange(aes(ymin = ci_lower,
-                    ymax = ci_upper)) +
-  geom_hline(yintercept = .5) +
-    theme_classic() +
-  theme(axis.ticks.x = element_blank(),
-        axis.text.x = element_blank()) +
-  facet_grid(domain ~ measure,
-             scales = "free_x")
 
 
-pi_scores |>
-  group_by(measure, domain) |>
-  summarise(proportion_sig = mean(sig, na.rm = TRUE))
+```
+
+
+# compute coverage of CI widths
+
+```{r}
+
+
 
 ```
 

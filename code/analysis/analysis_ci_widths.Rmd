@@ -66,9 +66,8 @@ round_df <- function(df, n_digits = 3) {
 }
 
 
-# get data from evaluative IRAPs
-data_trial_level <- read_csv("../data/data_trial_level.csv") %>%
-  filter(timepoint == "baseline")
+# get data
+data_trial_level <- readRDS("../data/data_processed.rds") 
 
 # outliers
 data_outliers <- data_trial_level %>%

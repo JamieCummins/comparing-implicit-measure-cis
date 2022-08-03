@@ -14,12 +14,10 @@ output:
 # TODO
 
 - data processing
-  - check generally
-  - exclusions?
-  - BCA bootstrapping
+  - EPT currently uses error, but isn't it typically latency?
+  - rerun
 - analysis
-  - demographics
-  - ensure BCA is used throughout
+  - add demographics
   - add pairwise comparisons using emmeans - see old code in IRAP repo
 
 ```{r, include=FALSE}
@@ -132,9 +130,8 @@ data_processed <- read_rds("../../data/processed/data_processed.rds") |>
 
 p_cis_by_domain <- 
   data_processed %>%
-  filter(method == "normal") %>%
   arrange(estimate) %>%
-  group_by(domain, measure, method) %>%
+  group_by(domain, measure) %>%
   mutate(ordered_id = row_number()/n()) %>%
   ungroup() %>%
   ggplot() +
@@ -165,13 +162,11 @@ Not meta analyzed as extreme skew in data means that residuals are very non-norm
 ```{r}
 
 data_map_ci_widths <- data_processed %>%
-  mutate(method = fct_relevel(method, "bca", "basic", "normal", "percent")) %>%
-  group_by(domain, measure, method) %>%
+  group_by(domain, measure) %>%
   do(point_estimate(.$ci_width, centrality = "MAP")) %>%
   ungroup()
 
 data_map_ci_widths %>%
-  filter(method == "normal") %>%
   pivot_wider(names_from = measure, values_from = MAP) %>%
   round_df(2) %>%
   dplyr::select(-method) %>%
@@ -185,20 +180,16 @@ data_map_ci_widths %>%
 ```{r}
 
 data_ci_width_map <- data_processed %>%
-  group_by(domain, measure, method) %>%
+  group_by(domain, measure) %>%
   do(point_estimate(.$ci_width, centrality = "MAP")) %>%
   ungroup() %>%
-  mutate(method = fct_relevel(method, "bca", "basic", "normal", "percent"),
-         method = fct_rev(method)) %>%
   mutate(domain = fct_rev(domain)) 
 
 # plot
 p_ci_widths <- 
   ggplot(data_ci_width_map, aes(MAP, fct_rev(measure), color = domain, shape = domain)) + 
   geom_point(position = position_dodge(width = 0.75)) +
-  #scale_shape_manual(labels = c("Percentile", "Normal", "Basic", "BCA"), values = c(17, 16, 15, 19)) +
   scale_shape_manual(values = c(17, 16, 15, 19)) +
-  #scale_color_viridis_d(begin = 0.2, end = 0.8, labels = c("Percentile", "Normal", "Basic", "BCA"), direction = -1) +
   scale_color_viridis_d(begin = 0.2, end = 0.8, direction = -1) +
   mdthemes::md_theme_linedraw() +
   labs(x = "Highest probability (MAP) 95% CI width",
@@ -240,8 +231,6 @@ p_diff_zero <-
                       xmax = proportion_diff_zero + sqrt(variance)*1.96),
                   position = position_dodge(width = 0.5)) + 
   geom_point(position = position_dodge(width = 0.5)) +
-  # scale_shape_manual(labels = c("Percentile", "Normal", "Basic", "BCA"), values = c(17, 16, 15, 19)) +
-  # scale_color_viridis_d(begin = 0.2, end = 0.8, labels = c("Percentile", "Normal", "Basic", "BCA"), direction = -1) +
   scale_shape_manual(values = c(17, 16, 15, 19)) +
   scale_color_viridis_d(begin = 0.2, end = 0.8, direction = -1) +
   mdthemes::md_theme_linedraw() +

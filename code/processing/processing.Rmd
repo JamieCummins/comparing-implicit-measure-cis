@@ -5,11 +5,6 @@ date: "`r Sys.Date()`"
 output: html_document
 ---
 
-# TODO
-
-- ensure scores for each measure are calculated correctly, eg using evaluations rather than RTs for AMP
-- why norm bootstraps rather than BCA? It generally shows best performance. however, reviewers might ask for multiple ones to show robustness, thats what happened with the irap paper.
-
 ```{r setup, include=FALSE}
 
 knitr::opts_chunk$set(echo = TRUE)
@@ -102,9 +97,7 @@ trial_level_tasks_labelled_df <-
 
 ```
 
-
 # score measures
-To-do: make sure measures are scored with appropriate metric (i.e., AMP with accuracy not RT)
 
 ```{r}
 
@@ -170,10 +163,10 @@ critical_trials_df <- trial_level_tasks_labelled_df |>
 
 ```
 
-
 # apply exclusions
 
 ## at session level
+
 Exclusions applied same as those from Bar-Anan & Nosek, 2014
 
 ```{r}
@@ -221,50 +214,44 @@ all_exclusions_applied_df <- critical_trials_df |>
 
 ```{r}
 
-n_boots = 100
+n_boots = 100 # for testing. change to 2000
 subset_sample = TRUE # to reduce processing time for testing
 
-# load models if already calculated
-# file.exists("models/pi_scores.rds")
-if(FALSE) {
-  
-  pi_scores <- read_rds("../../data/processed/data_processed.rds")
-
-} else {
+if(!file.exists("../../data/processed/data_processed.rds")){
   
   # Fast calculation of the A statistic - code from Ruscio (2008) supplementary materials
-  PI_score <- function(data, i) {
+  A_score <- function(data, i) {
     data_with_indexes <- data[i,] # boot function requires data and index
     x  <- na.omit(data_with_indexes$score[data_with_indexes$trial_consistency == "inconsistent"])
     y  <- na.omit(data_with_indexes$score[data_with_indexes$trial_consistency == "consistent"])
     nx <- length(x)
     ny <- length(y)
     rx <- sum(rank(c(x, y))[1:nx])
-    PI <- (rx / nx - (nx + 1) / 2) / ny
-    return(PI)
+    A <- (rx / nx - (nx + 1) / 2) / ny
+    return(A)
   }
   
-  bootstrap_PI_score <- function(data){
+  bootstrap_A_score <- function(data){
     
     require(dplyr)
     require(boot)
     
     fit <- 
       boot::boot(data      = data, 
-                 statistic = PI_score, 
+                 statistic = A_score, 
                  R         = n_boots, 
                  sim       = "ordinary", 
                  stype     = "i",
                  parallel  = "multicore", 
                  ncpus     = parallel::detectCores())
     
-    results <- boot::boot.ci(fit, conf = 0.95, type = c("norm"))
+    results <- boot::boot.ci(fit, conf = 0.95, type = c("bca"))
     
     output <- 
       tibble(method   = c("bca"),
              estimate = fit$t0,
-             ci_lower = c(results$normal[2]),
-             ci_upper = c(results$normal[3]))
+             ci_lower = c(results$bca[2]),
+             ci_upper = c(results$bca[3]))
     
     return(output)
   }
@@ -277,8 +264,8 @@ if(FALSE) {
     trials_to_process <- all_exclusions_applied_df
   }
   
-  # bootstrap PI scores 
-  pi_scores <- trials_to_process |>
+  # bootstrap A scores 
+  A_scores <- trials_to_process |>
     mutate(session_id = as.factor(SESSION_ID),
            trial_consistency = as.character(trial_consistency)) |>
     
@@ -292,33 +279,17 @@ if(FALSE) {
     
     # do bootstrapping scores
     group_by(session_id, measure, domain) |>
-    do(bootstrap_PI_score(data = .)) |>
+    do(bootstrap_A_score(data = .)) |>
     ungroup() |>
     mutate(sig = ifelse((ci_lower < 0.50 & ci_upper < 0.50) | (ci_lower > 0.50 & ci_upper > 0.50), TRUE, FALSE),
            ci_width = ci_upper - ci_lower) 
   
   # save to disk
-  write_rds(pi_scores, "../../data/processed/data_processed.rds")
+  write_rds(A_scores, "../../data/processed/data_processed.rds")
   
 }
 
 ```
 
 
-# compute discriminability between participants
-
-```{r}
-
-
-
-```
-
-
-# compute coverage of CI widths
-
-```{r}
-
-
-
-```
 

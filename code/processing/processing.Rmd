@@ -17,8 +17,14 @@ library(tidyverse)
 library(parallel)
 library(boot)
 
-raw_trial_level_df <- read.delim("../../data/raw/impraw.txt") 
-raw_sessions_df <- read.delim("../../data/raw/allds.txt")
+# raw_trial_level_df <- read.delim("../../data/raw/impraw.txt") 
+# raw_sessions_df <- read.delim("../../data/raw/allds.txt")
+# 
+# write_rds(raw_trial_level_df, "../../data/impraw.rds", compress = "gz")
+# write_rds(raw_sessions_df, "../../data/allds.rds")
+
+raw_trial_level_df <- read_rds("../../data/impraw.rds")
+raw_sessions_df <- read_rds("../../data/allds.rds")
 
 ```
 

@@ -13,11 +13,7 @@ output:
 
 # TODO
 
-- data processing
-  - EPT currently uses error, but isn't it typically latency?
-  - rerun
-- analysis
-  - add demographics
+- add demographics? or rely on Bar-Anan and Nosek's descriptions?
 
 ```{r, include=FALSE}
 knitr::opts_chunk$set(message=FALSE,
@@ -111,7 +107,8 @@ round_df <- function(df, n_digits = 3) {
 
 ```{r}
 
-data_processed <- read_rds("../../data/processed/data_processed_testing.rds") |>
+# for development
+data_processed_testing <- read_rds("../../data/processed/data_processed_testing.rds") |>
   mutate(domain = as.factor(str_to_sentence(domain)),
          measure = case_when(measure == "iat"   ~ "IAT",
                              measure == "biat"  ~ "Brief IAT",
@@ -121,9 +118,30 @@ data_processed <- read_rds("../../data/processed/data_processed_testing.rds") |>
                              measure == "ept"   ~ "EPT"),
          measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))
 
+data_processed <- data_processed_testing
+
+# # for realz
+# data_processed_full <- read_rds("../../data/processed/data_processed.rds") |>
+#   mutate(domain = as.factor(str_to_sentence(domain)),
+#          measure = case_when(measure == "iat"   ~ "IAT",
+#                              measure == "biat"  ~ "Brief IAT",
+#                              measure == "siat"  ~ "SC-IAT",
+#                              measure == "amp"   ~ "AMP",
+#                              measure == "gnat"  ~ "GNAT",
+#                              measure == "ept"   ~ "EPT"),
+#          measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT")) |>
+#   drop_na()
+# 
+# data_processed <- data_processed_full |>
+#   anti_join(data_processed_testing, by = c("session_id", "measure", "domain"))
+# 
+# percent_split <- round_half_up(nrow(data_processed_testing)/nrow(data_processed_full)*100, 0)
+
 ```
 
-## Caterpillar plot
+The "training" dataset which we used to refine the code with was `r percent_split`% of the full dataset.
+
+# Caterpillar plot
 
 ```{r fig.height=7, fig.width=6}
 

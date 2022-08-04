@@ -18,7 +18,6 @@ output:
   - rerun
 - analysis
   - add demographics
-  - add pairwise comparisons using emmeans - see old code in IRAP repo
 
 ```{r, include=FALSE}
 knitr::opts_chunk$set(message=FALSE,
@@ -112,7 +111,7 @@ round_df <- function(df, n_digits = 3) {
 
 ```{r}
 
-data_processed <- read_rds("../../data/processed/data_processed.rds") |>
+data_processed <- read_rds("../../data/processed/data_processed_testing.rds") |>
   mutate(domain = as.factor(str_to_sentence(domain)),
          measure = case_when(measure == "iat"   ~ "IAT",
                              measure == "biat"  ~ "Brief IAT",
@@ -214,9 +213,10 @@ data_diff_zero <-
   summarize(proportion_diff_zero = mean(sig, na.rm = TRUE),
             variance = plotrix::std.error(sig, na.rm = TRUE)^2,
             .groups = "drop") %>%
-  mutate(variance = ifelse(variance == 0, 0.000001, variance)) %>% # models cannot be run on zero variance, so offset by a minuscule amount
   # logit transform for analysis
-  mutate(proportion_diff_zero_logit = boot::logit(proportion_diff_zero))
+  mutate(proportion_diff_zero_logit = boot::logit(proportion_diff_zero)) %>%
+  filter(!(proportion_diff_zero == 0 & variance == 0)) %>%
+  mutate(variance = ifelse(variance == 0, 0.0001, variance)) 
 
 ```
 
@@ -256,11 +256,6 @@ fit_diff_zero <-
        weights = 1/variance, 
        data = data_diff_zero)
 
-# results table
-tab_model(fit_diff_zero, 
-          transform = "inv.logit",
-          ci.hyphen = ", ")
-
 # extract re Tau
 results_re_tau_diff_zero <- fit_diff_zero %>%
   merTools::REsdExtract() %>%
@@ -293,6 +288,16 @@ p_prop_nonzero
 
 results_diff_zero %>%
   round_df(2) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+# tests
+data_emms_diff_zero <- emmeans(fit_diff_zero, list(pairwise ~ measure), adjust = "holm") 
+
+summary(data_emms_diff_zero)$`pairwise differences of measure` %>%
+  as.data.frame() %>%
+  select(comparison = 1, p.value) %>%
+  mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
   kable() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
@@ -363,7 +368,8 @@ bootstrap_discriminability <- function(data){
 # bootstrapping has a long execution time, so load saved values if they've already been calculated
 if(file.exists("../../data/results/data_discriminability.csv")) {
   
-  data_discriminability <- read_csv("../../data/results/data_discriminability.csv")
+  data_discriminability <- read_csv("../../data/results/data_discriminability.csv") |>
+    mutate(measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))
   
 } else {
   
@@ -379,13 +385,23 @@ if(file.exists("../../data/results/data_discriminability.csv")) {
     ungroup() |>
     rename(proportion_discriminable = estimate) |>
     # logit transform for analysis
-    mutate(proportion_discriminable_logit = boot::logit(proportion_discriminable),
-           variance = ((ci_upper - ci_lower)/(1.96*2))^2,
-           domain = as.factor(domain))
-
+    mutate(variance = ((ci_upper - ci_lower)/(1.96*2))^2,
+           domain = as.factor(domain),
+           measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT")) %>%
+    filter(!(proportion_discriminable == 0 & variance == 0)) %>%
+    mutate(variance = ifelse(variance == 0, 0.0001, variance)) |>
+    # model cannot be run on zero variance or 0 or 1 logit, so offset by a minuscule amount
+    mutate(
+      proportion_discriminable_temp = case_when(proportion_discriminable < 0.001 ~ 0.001, 
+                                                proportion_discriminable > 0.999 ~ 0.999,
+                                                TRUE ~ proportion_discriminable),
+      proportion_discriminable_logit = boot::logit(proportion_discriminable_temp)
+    ) %>%
+    select(-proportion_discriminable_temp)
+  
   # save to disk
   write_csv(data_discriminability, "../../data/results/data_discriminability.csv")
-  
+
 }
 
 ```
@@ -400,11 +416,6 @@ fit_disciminability <-
        weights = 1/variance, 
        data = data_discriminability)
 
-# results table
-tab_model(fit_disciminability, 
-          transform = "inv.logit",
-          ci.hyphen = ", ")
-
 # extract re Tau
 results_re_tau_disciminability <- fit_disciminability %>%
   merTools::REsdExtract() %>%
@@ -417,11 +428,9 @@ results_disciminability <-
   dplyr::select(measure, estimate = emmean, se = SE, ci_lower = lower.CL, ci_upper = upper.CL) %>%
   mutate(pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_disciminability$tau^2)),  # as in metafor package's implementation of credibility intervals, see metafor::predict.rma.R
          pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_disciminability$tau^2))) |>
-  mutate(measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT")) |>
   select(-se) |>
   mutate_if(is.numeric, boot::inv.logit)
   
-
 # plot
 p_prop_discriminable <-
   ggplot(results_disciminability, aes(fct_rev(measure), estimate)) +
@@ -441,6 +450,16 @@ p_prop_discriminable
 
 results_disciminability %>%
   round_df(2) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+# tests
+data_emms_disciminability <- emmeans(fit_disciminability, list(pairwise ~ measure), adjust = "holm") 
+
+summary(data_emms_disciminability)$`pairwise differences of measure` %>%
+  as.data.frame() %>%
+  select(comparison = 1, p.value) %>%
+  mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
   kable() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
@@ -467,14 +486,15 @@ data_ci_width_proportions <- data_processed %>%
   # join this data into the original data
   full_join(observed_range_estimates, by = c("measure", "domain")) %>%
   # calculate ci width as a proportion of observed range
-  mutate(ci_width_proportion = ci_width / range) %>%
-  mutate(domain = as.factor(domain)) %>%
+  mutate(ci_width_proportion = ci_width / range,
+         domain = as.factor(domain),
+         measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT")) %>%
   # logit transform
   mutate(ci_width_proportion_temp = case_when(ci_width_proportion < 0.0001 ~ 0.0001,
                                               ci_width_proportion > 0.9999 ~ 0.9999,
                                               TRUE ~ ci_width_proportion),
          ci_width_proportion_logit = boot::logit(ci_width_proportion_temp)) %>%
-  select(-ci_width_proportion_temp)
+  select(-ci_width_proportion_temp) 
 
 ```
 
@@ -486,11 +506,6 @@ data_ci_width_proportions <- data_processed %>%
 fit_ci_width_proportions <- 
   lmer(ci_width_proportion_logit ~ 1 + measure + (1 | domain), 
        data = data_ci_width_proportions)
-
-# results table
-tab_model(fit_ci_width_proportions, 
-          transform = "inv.logit",
-          ci.hyphen = ", ")
 
 # extract re Tau
 results_re_tau_ci_width_proportions <- fit_ci_width_proportions %>%
@@ -504,7 +519,6 @@ results_ci_width_proportions <-
   dplyr::select(measure, estimate = emmean, se = SE, ci_lower = asymp.LCL, ci_upper = asymp.UCL) %>%
   mutate(pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_ci_width_proportions$tau^2)),
          pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_ci_width_proportions$tau^2))) %>%
-  mutate(measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT")) %>%
   select(-se) %>%
   mutate_if(is.numeric, boot::inv.logit)
 
@@ -525,6 +539,16 @@ p_ci_width_proportion_observed_range
 
 results_ci_width_proportions %>%
   round_df(2) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+# tests
+data_emms_ci_width_proportions <- emmeans(fit_ci_width_proportions, list(pairwise ~ measure), adjust = "holm") 
+
+summary(data_emms_ci_width_proportions)$`pairwise differences of measure` %>%
+  as.data.frame() %>%
+  select(comparison = 1, p.value) %>%
+  mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
   kable() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 

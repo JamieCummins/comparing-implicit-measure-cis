@@ -257,13 +257,22 @@ if(!file.exists("../../data/processed/data_processed.rds")){
                  parallel  = "multicore", 
                  ncpus     = parallel::detectCores()-1)
     
-    results <- boot::boot.ci(fit, conf = 0.95, type = c("bca"))
+    # results <- boot::boot.ci(fit, conf = 0.95, type = c("bca"))
+    # 
+    # output <- 
+    #   tibble(method   = "bca",
+    #          estimate = fit$t0,
+    #          ci_lower = results$bca[4],
+    #          ci_upper = results$bca[5])
+    # returns error: estimated adjustment 'w' is infinite
+    
+    results <- boot::boot.ci(fit, conf = 0.95, type = c("basic"))
     
     output <- 
-      tibble(method   = "bca",
+      tibble(method   = "basic",
              estimate = fit$t0,
-             ci_lower = results$bca[4],
-             ci_upper = results$bca[5])
+             ci_lower = results$basic[4],
+             ci_upper = results$basic[5])
     
     return(output)
   }
@@ -283,7 +292,7 @@ if(!file.exists("../../data/processed/data_processed.rds")){
     
     # ensure a sufficient number of observations per person per measure per trial type
     group_by(session_id, measure, domain, trial_consistency) |>
-    filter(n() >= 3) |>
+    filter(n() >= 10) |>
     
     # remove those who do not have sufficient observations for both trials per measure
     group_by(session_id, domain, measure) |>

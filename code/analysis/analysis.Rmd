@@ -169,7 +169,6 @@ data_map_ci_widths <- data_processed %>%
 data_map_ci_widths %>%
   pivot_wider(names_from = measure, values_from = MAP) %>%
   round_df(2) %>%
-  dplyr::select(-method) %>%
   kable() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
@@ -215,7 +214,9 @@ data_diff_zero <-
   summarize(proportion_diff_zero = mean(sig, na.rm = TRUE),
             variance = plotrix::std.error(sig, na.rm = TRUE)^2,
             .groups = "drop") %>%
-  mutate(variance = ifelse(variance == 0, 0.000001, variance))  # models cannot be run on zero variance, so offset by a minuscule amount
+  mutate(variance = ifelse(variance == 0, 0.000001, variance)) %>% # models cannot be run on zero variance, so offset by a minuscule amount
+  # logit transform for analysis
+  mutate(proportion_diff_zero_logit = boot::logit(proportion_diff_zero))
 
 ```
 
@@ -238,7 +239,8 @@ p_diff_zero <-
        y = "",
        color = "Domain",
        shape = "Domain") + 
-  theme(legend.position = "top")
+  theme(legend.position = "top") +
+  xlim(0, 1)
 
 p_diff_zero
 
@@ -250,13 +252,13 @@ p_diff_zero
 
 # fit model
 fit_diff_zero <-
-  data_diff_zero %>%
-  lmer(proportion_diff_zero ~ 1 + measure + (1 | domain),
+  lmer(proportion_diff_zero_logit ~ 1 + measure + (1 | domain),
        weights = 1/variance, 
-       data = .)
+       data = data_diff_zero)
 
 # results table
 tab_model(fit_diff_zero, 
+          transform = "inv.logit",
           ci.hyphen = ", ")
 
 # extract re Tau
@@ -270,7 +272,9 @@ results_diff_zero <-
   summary(emmeans(fit_diff_zero, ~ measure)) %>%
   dplyr::select(measure, estimate = emmean, se = SE, ci_lower = lower.CL, ci_upper = upper.CL) %>%
   mutate(pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)), 
-         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)))
+         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2))) |>
+  select(-se) |>
+  mutate_if(is.numeric, boot::inv.logit)
 
 # plot
 p_prop_nonzero <- 
@@ -280,8 +284,6 @@ p_prop_nonzero <-
   geom_point(size = 2.5) +
   mdthemes::md_theme_linedraw() +
   scale_y_continuous(breaks = c(0, .25, .5, .75, 1), labels = c("0.00<br/>(Worse)", "0.25", "0.50", "0.75", "1.00<br/>(Better)")) +
-  scale_shape_manual(values = c(17, 16, 15, 19)) +
-  scale_color_viridis_d(alpha = 1, begin = 0.2, end = 0.8, direction = -1) +
   labs(x = "",
        y = "Proportion of participants with non-zero scores<br/>") + 
   theme(legend.position = "none") +
@@ -376,9 +378,11 @@ if(file.exists("../../data/results/data_discriminability.csv")) {
     do(bootstrap_discriminability(data = .)) |>
     ungroup() |>
     rename(proportion_discriminable = estimate) |>
-    mutate(variance = ((ci_upper - ci_lower)/(1.96*2))^2,
+    # logit transform for analysis
+    mutate(proportion_discriminable_logit = boot::logit(proportion_discriminable),
+           variance = ((ci_upper - ci_lower)/(1.96*2))^2,
            domain = as.factor(domain))
-  
+
   # save to disk
   write_csv(data_discriminability, "../../data/results/data_discriminability.csv")
   
@@ -392,12 +396,13 @@ if(file.exists("../../data/results/data_discriminability.csv")) {
 
 # fit meta analytic model
 fit_disciminability <- 
-  lmer(proportion_discriminable ~ 1 + measure + (1 | domain), 
+  lmer(proportion_discriminable_logit ~ 1 + measure + (1 | domain), 
        weights = 1/variance, 
        data = data_discriminability)
 
 # results table
 tab_model(fit_disciminability, 
+          transform = "inv.logit",
           ci.hyphen = ", ")
 
 # extract re Tau
@@ -411,7 +416,11 @@ results_disciminability <-
   summary(emmeans(fit_disciminability, ~ measure)) %>%
   dplyr::select(measure, estimate = emmean, se = SE, ci_lower = lower.CL, ci_upper = upper.CL) %>%
   mutate(pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_disciminability$tau^2)),  # as in metafor package's implementation of credibility intervals, see metafor::predict.rma.R
-         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_disciminability$tau^2)))
+         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_disciminability$tau^2))) |>
+  mutate(measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT")) |>
+  select(-se) |>
+  mutate_if(is.numeric, boot::inv.logit)
+  
 
 # plot
 p_prop_discriminable <-
@@ -439,21 +448,7 @@ results_disciminability %>%
 
 # CI widths as a proportion of observed range
 
-## Observed range
-
-```{r}
-
-data_processed %>%
-  group_by(measure) %>%
-  summarize(min_observed_score = min(estimate),
-            max_observed_score = max(estimate)) %>%
-  mutate(observed_range_score = max_observed_score - min_observed_score) %>% 
-  round_df(2) %>%
-  #gather() %>%
-  kable() %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
-
-```
+NB observed range of confidence intervals
 
 ## Calculate scores
 
@@ -462,8 +457,8 @@ data_processed %>%
 ## calculate observed ranges 
 observed_range_estimates <- data_processed %>%
   group_by(measure, domain) %>%
-  dplyr::summarize(min = min(estimate, na.rm = TRUE),
-                   max = max(estimate, na.rm = TRUE),
+  dplyr::summarize(min = min(ci_lower, na.rm = TRUE),
+                   max = max(ci_upper, na.rm = TRUE),
                    .groups = "drop") %>%
   mutate(range = max - min) 
 
@@ -473,7 +468,13 @@ data_ci_width_proportions <- data_processed %>%
   full_join(observed_range_estimates, by = c("measure", "domain")) %>%
   # calculate ci width as a proportion of observed range
   mutate(ci_width_proportion = ci_width / range) %>%
-  mutate(domain = as.factor(domain))
+  mutate(domain = as.factor(domain)) %>%
+  # logit transform
+  mutate(ci_width_proportion_temp = case_when(ci_width_proportion < 0.0001 ~ 0.0001,
+                                              ci_width_proportion > 0.9999 ~ 0.9999,
+                                              TRUE ~ ci_width_proportion),
+         ci_width_proportion_logit = boot::logit(ci_width_proportion_temp)) %>%
+  select(-ci_width_proportion_temp)
 
 ```
 
@@ -483,11 +484,12 @@ data_ci_width_proportions <- data_processed %>%
 
 # fit model
 fit_ci_width_proportions <- 
-  lmer(ci_width_proportion ~ 1 + measure + (1 | domain), 
+  lmer(ci_width_proportion_logit ~ 1 + measure + (1 | domain), 
        data = data_ci_width_proportions)
 
 # results table
 tab_model(fit_ci_width_proportions, 
+          transform = "inv.logit",
           ci.hyphen = ", ")
 
 # extract re Tau
@@ -501,19 +503,19 @@ results_ci_width_proportions <-
   summary(emmeans(fit_ci_width_proportions, ~ measure)) %>%
   dplyr::select(measure, estimate = emmean, se = SE, ci_lower = asymp.LCL, ci_upper = asymp.UCL) %>%
   mutate(pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_ci_width_proportions$tau^2)),
-         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_ci_width_proportions$tau^2))) 
+         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_ci_width_proportions$tau^2))) %>%
+  mutate(measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT")) %>%
+  select(-se) %>%
+  mutate_if(is.numeric, boot::inv.logit)
 
 # plot
 p_ci_width_proportion_observed_range <- 
-  results_ci_width_proportions %>%
-  ggplot(aes(fct_rev(measure), estimate)) +
+  ggplot(results_ci_width_proportions, aes(fct_rev(measure), estimate)) +
   #geom_linerange(aes(ymin = pi_lower, ymax = pi_upper), size = 0.5, linetype = "solid") +
   geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
   geom_point(size = 2.5) +
   mdthemes::md_theme_linedraw() +
   scale_y_continuous(breaks = c(0, .25, .5, .75, 1), labels = c("0.00<br/>(Better)", "0.25", "0.50", "0.75", "1.00<br/>(Worse)")) +
-  scale_shape_manual(values = c(17, 16, 15, 19)) +
-  scale_color_viridis_d(begin = 0.3, end = 0.7, direction = -1) +
   labs(x = "",
        y = "Proportion of observed range covered <br/>by individual participants' 95% CIs") +
   theme(legend.position = "none") +
@@ -585,7 +587,7 @@ Note that the theoretical max possible range of A scores is 0 to 1, but such ext
 ```{r fig.height=7, fig.width=6}
 
 p_combined <- 
-  p_prop_nonzero + 
+  p_prop_nonzero +
   p_prop_discriminable + 
   p_ci_width_proportion_observed_range +
   plot_layout(ncol = 1)

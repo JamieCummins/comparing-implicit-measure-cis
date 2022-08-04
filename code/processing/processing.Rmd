@@ -20,11 +20,11 @@ library(boot)
 # raw_trial_level_df <- read.delim("../../data/raw/impraw.txt") 
 # raw_sessions_df <- read.delim("../../data/raw/allds.txt")
 # 
-# write_rds(raw_trial_level_df, "../../data/impraw.rds", compress = "gz")
-# write_rds(raw_sessions_df, "../../data/allds.rds")
+# write_rds(raw_trial_level_df, "../../data/raw/impraw.rds", compress = "gz")
+# write_rds(raw_sessions_df, "../../data/raw/allds.rds", compress = "gz")
 
-raw_trial_level_df <- read_rds("../../data/impraw.rds")
-raw_sessions_df <- read_rds("../../data/allds.rds")
+raw_trial_level_df <- read_rds("../../data/raw/impraw.rds")
+raw_sessions_df <- read_rds("../../data/raw/allds.rds")
 
 ```
 
@@ -214,14 +214,20 @@ all_exclusions_applied_df <- critical_trials_df |>
     (measure %in% c("ept", "amp"))
   )
 
+write_rds(all_exclusions_applied_df, "../../data/processed/data_trials_for_bootstrapping.rds", compress = "gz")
+# all_exclusions_applied_df <- read_rds("../../data/processed/data_trials_for_bootstrapping.rds")
+
+
 ```
 
-# compute scores from zero 
+# bootstrap 95% CIs and compare against neutral point 
 
 ```{r}
 
-n_boots = 100 # for testing. change to 2000
-subset_sample = TRUE # to reduce processing time for testing
+n_boots = 2000
+subset_sample = FALSE # to reduce processing time for testing
+
+dir.create("../../data/processed")
 
 if(!file.exists("../../data/processed/data_processed.rds")){
   
@@ -249,15 +255,15 @@ if(!file.exists("../../data/processed/data_processed.rds")){
                  sim       = "ordinary", 
                  stype     = "i",
                  parallel  = "multicore", 
-                 ncpus     = parallel::detectCores())
+                 ncpus     = parallel::detectCores()-1)
     
     results <- boot::boot.ci(fit, conf = 0.95, type = c("bca"))
     
     output <- 
-      tibble(method   = c("bca"),
+      tibble(method   = "bca",
              estimate = fit$t0,
-             ci_lower = c(results$bca[2]),
-             ci_upper = c(results$bca[3]))
+             ci_lower = results$bca[4],
+             ci_upper = results$bca[5])
     
     return(output)
   }
@@ -265,7 +271,7 @@ if(!file.exists("../../data/processed/data_processed.rds")){
   
   if(subset_sample == TRUE) {
     trials_to_process <- all_exclusions_applied_df |>
-      slice_head(n = 500000)   
+      slice_head(n = 500000)
     } else {
     trials_to_process <- all_exclusions_applied_df
   }

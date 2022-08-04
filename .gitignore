@@ -1,3 +1,4 @@
 *.Rhistory
 *.DS_store
 old/*
+*~$

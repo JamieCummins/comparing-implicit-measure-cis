@@ -39,6 +39,8 @@ library(ggstance)
 library(janitor)
 # library(merTools) called via merTools:: to avoid namespace collisions between MASS and dplyr
 
+# create necessary directories
+dir.create("../../data/results")
 
 # set seed for reproducibility
 set.seed(42)
@@ -395,14 +397,13 @@ bootstrap_discriminability <- function(data){
                parallel  = "multicore", 
                ncpus     = parallel::detectCores())
   
-  results <- boot::boot.ci(fit, conf = 0.95, type = c("bca"))
+  results <- boot::boot.ci(fit, conf = 0.95, type = c("perc"))
   
   output <- 
     tibble(
-      method   = "bca",
       estimate = fit$t0,
-      ci_lower = results$bca[4],
-      ci_upper = results$bca[5]
+      ci_lower = results$percent[4],
+      ci_upper = results$percent[5]
     )
   
   return(output)
@@ -419,7 +420,7 @@ if(file.exists("../../data/results/data_discriminability.csv")) {
   # bootstrap D scores 
   data_discriminability <- data_processed |>
     mutate(se = (ci_upper - ci_lower)/(1.96*2)) |>
-    select(unique_id, domain, measure, estimate, se) |>
+    select(session_id, domain, measure, estimate, se) |>
     group_by(domain, measure) |>
     do(bootstrap_discriminability(data = .)) |>
     ungroup() |>

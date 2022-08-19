@@ -14,6 +14,7 @@ output:
 # TODO
 
 - add demographics? or rely on Bar-Anan and Nosek's descriptions?
+- finalize plots in combined plots section
 
 ```{r, include=FALSE}
 knitr::opts_chunk$set(message=FALSE,
@@ -121,6 +122,7 @@ data_processed_testing <- read_rds("../../data/processed/data_processed_testing.
          measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))
 
 data_processed <- data_processed_testing
+percent_split <- "???"
 
 # # for realz
 # data_processed_full <- read_rds("../../data/processed/data_processed.rds") |>
@@ -323,6 +325,43 @@ summary(data_emms_diff_zero)$`pairwise differences of measure` %>%
 
 ```
 
+## Combined plot
+
+```{r}
+
+data_diff_zero_combined <- 
+  bind_rows(results_diff_zero %>%
+              mutate(domain = "Meta-analysis"),
+            data_diff_zero %>%
+              mutate(ci_lower = proportion_diff_zero - sqrt(variance)*1.96,
+                     ci_upper = proportion_diff_zero + sqrt(variance)*1.96) %>%
+              select(measure, domain, estimate = proportion_diff_zero, ci_lower, ci_upper)) %>%
+  mutate(domain = fct_relevel(domain, "Meta-analysis", "Self", "Race", "Politics"),
+         point_size = case_when(domain == "Meta-analysis" ~ 3,
+                                TRUE ~ 1.5))
+
+p_diff_zero <- 
+  data_diff_zero_combined %>%
+  ggplot(aes(estimate, fct_rev(measure), color = domain, shape = domain)) +
+  geom_linerangeh(aes(xmin = ci_lower,
+                      xmax = ci_upper),
+                  position = position_dodge(width = 0.6)) + 
+  geom_point(aes(size = point_size), position = position_dodge(width = 0.6)) +
+  scale_color_manual(values = c("#000000", viridisLite::viridis(begin = 0.4, end = 0.8, n = 3))) +
+  scale_shape_manual(values = c(15, 16, 16, 16)) +
+  scale_size(range = c(1.5, 3), guide = "none") +
+  mdthemes::md_theme_linedraw() +
+  labs(x = "Proportion of participants<br/>with non-zero effects",
+       y = "",
+       color = "Domain",
+       shape = "Domain") + 
+  theme(legend.position = "top") +
+  xlim(0, 1) 
+
+p_diff_zero
+
+```
+
 # Proportion different from one another
 
 Note: Discriminability between a score and zero can be determined using the CI, because zero is a known value and only the score is measured with uncertainty. However, discriminability between two scores must take into account the uncertainty in the estimation of both scores. Weir (2005) argues that such an interval can be estimated by expanding the CIs by sqrt(2). Here I refer to these intervals as Discriminability Intervals (DIs).
@@ -429,7 +468,6 @@ if(file.exists("../../data/results/data_discriminability.csv")) {
     mutate(variance = ((ci_upper - ci_lower)/(1.96*2))^2,
            domain = as.factor(domain),
            measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT")) %>%
-    filter(!(proportion_discriminable == 0 & variance == 0)) %>%
     mutate(variance = ifelse(variance == 0, 0.0001, variance)) |>
     # model cannot be run on zero variance or 0 or 1 logit, so offset by a minuscule amount
     mutate(
@@ -463,7 +501,7 @@ p_discriminability <-
   scale_shape_manual(values = c(17, 16, 15, 19)) +
   scale_color_viridis_d(begin = 0.2, end = 0.8, direction = -1) +
   mdthemes::md_theme_linedraw() +
-  labs(x = "Proportion of scores<br/>differerent from other scores",
+  labs(x = "Probability that differences can be detected<br/>between two participants' scores",
        y = "",
        color = "Domain",
        shape = "Domain") + 
@@ -511,7 +549,7 @@ p_prop_discriminable <-
   scale_color_viridis_d(begin = 0.3, end = 0.7) +
   mdthemes::md_theme_linedraw() +
   labs(x = "",
-       y = "Probability that two participants' score differ") +
+       y = "Probability that differences can be detected<br/>between two participants' scores<br/>") +
   theme(legend.position = "none") +
   coord_flip(ylim = c(0, 1))
 
@@ -618,7 +656,7 @@ results_re_tau_ci_width_proportions <- fit_ci_width_proportions %>%
 # extract marginal means
 results_ci_width_proportions <- 
   summary(emmeans(fit_ci_width_proportions, ~ measure)) %>%
-  dplyr::select(measure, estimate = emmean, se = SE, ci_lower = asymp.LCL, ci_upper = asymp.UCL) %>%
+  dplyr::select(measure, estimate = emmean, se = SE, ci_lower = lower.CL, ci_upper = upper.CL) %>%
   mutate(pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_ci_width_proportions$tau^2)),
          pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_ci_width_proportions$tau^2))) %>%
   select(-se) %>%

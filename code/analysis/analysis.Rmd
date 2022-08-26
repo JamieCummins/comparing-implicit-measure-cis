@@ -188,7 +188,6 @@ data_diff_zero <-
             .groups = "drop") %>%
   # logit transform for analysis
   mutate(proportion_diff_zero_logit = boot::logit(proportion_diff_zero)) %>%
-  filter(!(proportion_diff_zero == 0 & variance == 0)) %>%
   mutate(variance = ifelse(variance == 0, 0.0001, variance))
 
 ```

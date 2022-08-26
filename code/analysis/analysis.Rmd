@@ -119,6 +119,7 @@ data_processed_training <- read_rds("../../data/processed/data_processed_trainin
 
 data_processed <- data_processed_training
 percent_split <- "???"
+reverse_percent_split <- "???"
 
 # # for realz: use the remaining 90% as the testing set to make conclusions
 # data_processed_full <- read_rds("../../data/processed/data_processed.rds") |>
@@ -139,10 +140,11 @@ percent_split <- "???"
 # write_rds(data_processed, "../../data/processed/data_processed_testing.rds")
 #
 # percent_split <- round_half_up(nrow(data_processed_training)/nrow(data_processed_full)*100, 0)
+# reverse_percent_split <- 1 - percent_split
 
 ```
 
-The "training" data set which we used to refine the code with was `r percent_split`% of the full dataset. Results are reported from the remaining `r 1-percent_split`% testing data set.
+The "training" data set which we used to refine the code with was `r percent_split`% of the full dataset. Results are reported from the remaining `r reverse_percent_split`% testing data set.
 
 # RQ1. Proportion of indiviudal scores that are detectably different from zero
 
@@ -342,8 +344,6 @@ p_nonzero
 ```
 
 # RQ2. Probability that differences can be detected between two participants' scores
-
-Note: Discriminability between a score and zero can be determined using the CI, because zero is a known value and only the score is measured with uncertainty. However, discriminability between two scores must take into account the uncertainty in the estimation of both scores. Weir (2005) argues that such an interval can be estimated by expanding the CIs by sqrt(2). Here I refer to these intervals as Discriminability Intervals (DIs).
 
 ## Calculate scores
 

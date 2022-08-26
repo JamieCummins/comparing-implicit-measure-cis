@@ -163,9 +163,8 @@ critical_trials_df <- trial_level_tasks_labelled_df |>
                  trial_consistent_terms) ~ "inconsistent"),
     TRIAL_ERROR = as.numeric(TRIAL_ERROR),
     TRIAL_LATENCY = as.numeric(TRIAL_LATENCY),
-    score = case_when(measure %in% c("iat", "biat", "siat", "gnat") ~ TRIAL_LATENCY,
-                      measure %in% c("amp") ~ TRIAL_ERROR,
-                      measure %in% c("ept") ~ abs(TRIAL_ERROR - 1)))
+    score = case_when(measure %in% c("iat", "biat", "siat", "gnat", "ept") ~ TRIAL_LATENCY,
+                      measure %in% c("amp") ~ TRIAL_ERROR))
 
 ```
 
@@ -211,14 +210,17 @@ all_exclusions_applied_df <- critical_trials_df |>
     |
     (measure %in% c("gnat") & (TRIAL_LATENCY > 400 & TRIAL_LATENCY < 1200) & (TRIAL_ERROR %in% c(0, 3)))
     |
-    (measure %in% c("ept", "amp"))
+    (measure %in% c("ept") & (1500 >= TRIAL_LATENCY))
+    |
+    (measure %in% c("amp"))
   )
 
-write_rds(all_exclusions_applied_df, "../../data/processed/data_trials_for_bootstrapping.rds", compress = "gz")
+write_rds(all_exclusions_applied_df, "../../data/processed/data_trials_for_bootstrapping.rds")
 # all_exclusions_applied_df <- read_rds("../../data/processed/data_trials_for_bootstrapping.rds")
 
 
 ```
+
 
 # bootstrap 95% CIs and compare against neutral point 
 
@@ -227,9 +229,7 @@ write_rds(all_exclusions_applied_df, "../../data/processed/data_trials_for_boots
 n_boots = 2000
 subset_sample = FALSE # to reduce processing time for testing
 
-dir.create("../../data/processed")
-
-if(!file.exists("../../data/processed/data_processed.rds")){
+if(TRUE){
   
   # Fast calculation of the A statistic - code from Ruscio (2008) supplementary materials
   A_score <- function(data, i) {
@@ -282,7 +282,8 @@ if(!file.exists("../../data/processed/data_processed.rds")){
     trials_to_process <- all_exclusions_applied_df |>
       slice_head(n = 500000)
     } else {
-    trials_to_process <- all_exclusions_applied_df
+    trials_to_process <- all_exclusions_applied_df |>
+      filter(measure == "ept") # delete dis after
   }
   
   # bootstrap A scores 
@@ -306,9 +307,15 @@ if(!file.exists("../../data/processed/data_processed.rds")){
            ci_width = ci_upper - ci_lower) 
   
   # save to disk
-  write_rds(A_scores, "../../data/processed/data_processed.rds")
+  # write_rds(A_scores, "../../data/processed/data_processed.rds")
   
 }
+
+# update_old <- read_rds("../../data/processed/data_processed.rds") |>
+#   filter(measure != "ept") |>
+#   bind_rows(A_scores)
+# 
+# write_rds(update_old, "../../data/processed/data_processed.rds")
 
 ```
 

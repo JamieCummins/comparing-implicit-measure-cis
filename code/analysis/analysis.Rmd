@@ -222,7 +222,7 @@ p_ci_widths
 
 ```
 
-# Proportion different from zero
+# RQ1. Proportion different from zero
 
 ## Calculate scores
 
@@ -362,7 +362,7 @@ p_diff_zero
 
 ```
 
-# Proportion different from one another
+# RQ2. Proportion different from one another
 
 Note: Discriminability between a score and zero can be determined using the CI, because zero is a known value and only the score is measured with uncertainty. However, discriminability between two scores must take into account the uncertainty in the estimation of both scores. Weir (2005) argues that such an interval can be estimated by expanding the CIs by sqrt(2). Here I refer to these intervals as Discriminability Intervals (DIs).
 
@@ -572,7 +572,7 @@ summary(data_emms_disciminability)$`pairwise differences of measure` %>%
 
 ```
 
-# CI widths as a proportion of observed range
+# RQ3. CI widths as a proportion of observed range
 
 NB observed range of confidence intervals
 

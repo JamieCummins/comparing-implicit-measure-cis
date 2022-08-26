@@ -215,7 +215,7 @@ all_exclusions_applied_df <- critical_trials_df |>
     (measure %in% c("amp"))
   )
 
-write_rds(all_exclusions_applied_df, "../../data/processed/data_trials_for_bootstrapping.rds")
+write_rds(all_exclusions_applied_df, "../../data/processed/data_trials_for_bootstrapping.rds", compress = "gz")
 # all_exclusions_applied_df <- read_rds("../../data/processed/data_trials_for_bootstrapping.rds")
 
 
@@ -282,8 +282,7 @@ if(TRUE){
     trials_to_process <- all_exclusions_applied_df |>
       slice_head(n = 500000)
     } else {
-    trials_to_process <- all_exclusions_applied_df |>
-      filter(measure == "ept") # delete dis after
+    trials_to_process <- all_exclusions_applied_df
   }
   
   # bootstrap A scores 
@@ -307,15 +306,9 @@ if(TRUE){
            ci_width = ci_upper - ci_lower) 
   
   # save to disk
-  # write_rds(A_scores, "../../data/processed/data_processed.rds")
+  write_rds(A_scores, "../../data/processed/data_processed.rds")
   
 }
-
-# update_old <- read_rds("../../data/processed/data_processed.rds") |>
-#   filter(measure != "ept") |>
-#   bind_rows(A_scores)
-# 
-# write_rds(update_old, "../../data/processed/data_processed.rds")
 
 ```
 

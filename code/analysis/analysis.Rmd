@@ -14,8 +14,7 @@ output:
 # TODO
 
 - add demographics? or rely on Bar-Anan and Nosek's descriptions?
-- finalize plots in combined plots section, remove "domain" from legend
-- rebootstrap EP data 
+- re-bootstrap EP data 
 
 ```{r, include=FALSE}
 knitr::opts_chunk$set(message=FALSE,
@@ -68,27 +67,21 @@ TODO
 
 ```{r}
 
-# data_outliers %>%
-#   distinct(session_id, .keep_all = TRUE) %>%
-#   count(rt_outlier) %>%
-#   kable() %>%
-#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
-# 
 # data_descriptives <- data_outliers_removed %>%
 #   distinct(session_id, .keep_all = TRUE)
 # 
 # data_descriptives %>%
-#   count(domain) %>%
+#   count(domain, measure) %>%
 #   kable() %>%
 #   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 # 
 # data_descriptives %>%
-#   count(domain) %>%
+#   count(domain, measure) %>%
 #   summarize(total_n = sum(n),
-#             min_n_per_domain = min(n),
-#             max_n_per_domain = max(n),
-#             mean_n_per_domain = round(mean(n, na.rm = TRUE), 2),
-#             sd_n_per_domain = round(sd(n, na.rm = TRUE), 2)) %>%
+#             min_n = min(n),
+#             max_n = max(n),
+#             mean_n = round(mean(n, na.rm = TRUE), 2),
+#             sd_n = round(sd(n, na.rm = TRUE), 2)) %>%
 #   gather() %>%
 #   kable() %>%
 #   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
@@ -252,7 +245,7 @@ data_diff_zero <-
 
 ```{r}
 
-p_diff_zero <- 
+p_nonzero_domains <- 
   data_diff_zero %>%
   mutate(domain = fct_reorder(domain, proportion_diff_zero, .fun = mean)) %>%
   ggplot(aes(proportion_diff_zero, fct_rev(measure), color = domain, shape = domain)) +
@@ -270,7 +263,7 @@ p_diff_zero <-
   theme(legend.position = "top") +
   xlim(0, 1)
 
-p_diff_zero
+p_nonzero_domains
 
 ```
 
@@ -300,7 +293,7 @@ results_diff_zero <-
   mutate_if(is.numeric, boot::inv.logit)
 
 # plot
-p_prop_nonzero <- 
+p_nonzero_meta <- 
   ggplot(results_diff_zero, aes(fct_rev(measure), estimate)) +
   #geom_linerange(aes(ymin = pi_lower, ymax = pi_upper), size = 0.5, linetype = "solid") +
   geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
@@ -312,7 +305,7 @@ p_prop_nonzero <-
   theme(legend.position = "none") +
   coord_flip(ylim = c(0, 1))
 
-p_prop_nonzero
+p_nonzero_meta
 
 results_diff_zero %>%
   round_df(2) %>%
@@ -346,7 +339,30 @@ data_diff_zero_combined <-
          point_size = case_when(domain == "Meta-analysis" ~ 3,
                                 TRUE ~ 1.5))
 
-p_diff_zero <- 
+# p_nonzero <- 
+#   data_diff_zero_combined %>%
+#   ggplot(aes(fct_rev(measure), estimate, color = domain, shape = domain)) +
+#   geom_linerange(aes(ymin = ci_lower,
+#                      ymax = ci_upper),
+#                  position = position_dodge(width = 0.6)) + 
+#   geom_point(aes(size = point_size), position = position_dodge(width = 0.6)) +
+#   scale_color_manual(values = c("#000000", viridisLite::viridis(begin = 0.4, end = 0.8, n = 3))) +
+#   scale_shape_manual(values = c(15, 16, 16, 16)) +
+#   scale_size(range = c(1.5, 3), guide = "none")  +
+#   scale_y_continuous(breaks = c(0, .25, .5, .75, 1), labels = c("0.00<br/>(Worse)", "0.25", "0.50", "0.75", "1.00<br/>(Better)")) +
+#   coord_flip(ylim = c(0, 1)) +
+#   mdthemes::md_theme_linedraw() +
+#   labs(x = "",
+#        y = "Proportion of participants<br/>with non-zero effects",
+#        color = "Domain",
+#        shape = "Domain") + 
+#   theme(legend.position = "top",
+#         legend.title = element_blank()) +
+#   guides(color = guide_legend(reverse = TRUE),
+#          shape = guide_legend(reverse = TRUE)) +
+#   ylim(0, 1)
+
+p_nonzero <- 
   data_diff_zero_combined %>%
   ggplot(aes(estimate, fct_rev(measure), color = domain, shape = domain)) +
   geom_linerangeh(aes(xmin = ci_lower,
@@ -356,15 +372,21 @@ p_diff_zero <-
   scale_color_manual(values = c("#000000", viridisLite::viridis(begin = 0.4, end = 0.8, n = 3))) +
   scale_shape_manual(values = c(15, 16, 16, 16)) +
   scale_size(range = c(1.5, 3), guide = "none") +
+  scale_x_continuous(breaks = c(0, .25, .5, .75, 1), 
+                     labels = c("0.00<br/>(Worse)", "0.25", "0.50", "0.75", "1.00<br/>(Better)"),
+                     limits = c(0,1)) +
+  #coord_flip(ylim = c(0, 1)) +
   mdthemes::md_theme_linedraw() +
   labs(x = "Proportion of participants<br/>with non-zero effects",
        y = "",
        color = "Domain",
        shape = "Domain") + 
-  theme(legend.position = "top") +
-  xlim(0, 1) 
+  theme(legend.position = "top",
+        legend.title = element_blank()) +
+  guides(color = guide_legend(reverse = TRUE),
+         shape = guide_legend(reverse = TRUE))
 
-p_diff_zero
+p_nonzero
 
 ```
 
@@ -495,7 +517,7 @@ if(file.exists("../../data/results/data_discriminability.csv")) {
 
 ```{r}
 
-p_discriminability <- 
+p_discriminability_domains <- 
   data_discriminability %>%
   mutate(domain = fct_rev(factor(domain)),
          measure = fct_rev(fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))) %>%
@@ -515,7 +537,7 @@ p_discriminability <-
         panel.spacing = unit(1.5, "lines")) +
   coord_cartesian(xlim = c(0,1))
 
-p_discriminability
+p_discriminability_domains
 
 ```
 
@@ -545,7 +567,7 @@ results_disciminability <-
   mutate_if(is.numeric, boot::inv.logit)
   
 # plot
-p_prop_discriminable <-
+p_discriminability_meta <-
   ggplot(results_disciminability, aes(fct_rev(measure), estimate)) +
   #geom_linerange(aes(ymin = pi_lower, ymax = pi_upper), size = 0.5, linetype = "solid") +
   geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
@@ -559,7 +581,7 @@ p_prop_discriminable <-
   theme(legend.position = "none") +
   coord_flip(ylim = c(0, 1))
 
-p_prop_discriminable 
+p_discriminability_meta 
 
 results_disciminability %>%
   round_df(2) %>%
@@ -575,6 +597,47 @@ summary(data_emms_disciminability)$`pairwise differences of measure` %>%
   mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
   kable() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+```
+
+## Combined plot
+
+```{r}
+
+data_disciminability_combined <- 
+  bind_rows(results_disciminability %>%
+              mutate(domain = "Meta-analysis"),
+            data_discriminability %>%
+              select(measure, domain, estimate = proportion_discriminable, ci_lower, ci_upper)) %>%
+  mutate(domain = fct_relevel(domain, "Meta-analysis", "Self", "Race", "Politics"),
+         point_size = case_when(domain == "Meta-analysis" ~ 3,
+                                TRUE ~ 1.5))
+
+p_discriminability <- 
+  data_disciminability_combined %>%
+  ggplot(aes(estimate, fct_rev(measure), color = domain, shape = domain)) +
+  geom_linerangeh(aes(xmin = ci_lower,
+                      xmax = ci_upper),
+                  position = position_dodge(width = 0.6)) + 
+  geom_point(aes(size = point_size), position = position_dodge(width = 0.6)) +
+  scale_color_manual(values = c("#000000", viridisLite::viridis(begin = 0.4, end = 0.8, n = 3))) +
+  scale_shape_manual(values = c(15, 16, 16, 16)) +
+  scale_size(range = c(1.5, 3), guide = "none") +
+  scale_x_continuous(breaks = c(0, .25, .5, .75, 1), 
+                     labels = c("0.00<br/>(Worse)", "0.25", "0.50", "0.75", "1.00<br/>(Better)"),
+                     limits = c(0,1)) +
+  mdthemes::md_theme_linedraw() +
+  labs(x = "Probability that differences can be detected<br/>between two participants' scores<br/>",
+       y = "",
+       color = "Domain",
+       shape = "Domain") + 
+  # theme(legend.position = "top",
+  #       legend.title = element_blank()) +
+  theme(legend.position="none") +
+  guides(color = guide_legend(reverse = TRUE),
+         shape = guide_legend(reverse = TRUE))
+
+p_discriminability
 
 ```
 
@@ -619,7 +682,7 @@ data_ci_width_proportions <- data_processed %>%
 
 ```{r}
 
-p_coverage <- 
+p_coverage_domains <- 
   data_ci_width_proportions %>%
   mutate(domain = fct_rev(factor(domain)),
          measure = fct_rev(fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))) %>%
@@ -639,7 +702,7 @@ p_coverage <-
         panel.spacing = unit(1.5, "lines")) +
   coord_cartesian(xlim = c(0,1))
 
-p_coverage
+p_coverage_domains
 
 ```
 
@@ -669,7 +732,7 @@ results_ci_width_proportions <-
   mutate_if(is.numeric, boot::inv.logit)
 
 # plot
-p_ci_width_proportion_observed_range <- 
+p_coverage_meta <- 
   ggplot(results_ci_width_proportions, aes(fct_rev(measure), estimate)) +
   #geom_linerange(aes(ymin = pi_lower, ymax = pi_upper), size = 0.5, linetype = "solid") +
   geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
@@ -681,7 +744,7 @@ p_ci_width_proportion_observed_range <-
   theme(legend.position = "none") +
   coord_flip(ylim = c(0, 1))
 
-p_ci_width_proportion_observed_range
+p_coverage_meta
 
 results_ci_width_proportions %>%
   round_df(2) %>%
@@ -697,6 +760,49 @@ summary(data_emms_ci_width_proportions)$`pairwise differences of measure` %>%
   mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
   kable() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+```
+
+## Combined plot
+
+```{r}
+
+data_coverage_combined <- 
+  bind_rows(results_ci_width_proportions %>%
+              mutate(domain = "Meta-analysis"),
+            data_ci_width_proportions %>%
+              mutate(ci_lower = ci_width_proportion_mean - sqrt(variance)*1.96,
+                     ci_upper = ci_width_proportion_mean + sqrt(variance)*1.96) %>%
+              select(measure, domain, estimate = ci_width_proportion_mean, ci_lower, ci_upper)) %>%
+  mutate(domain = fct_relevel(domain, "Meta-analysis", "Self", "Race", "Politics"),
+         point_size = case_when(domain == "Meta-analysis" ~ 3,
+                                TRUE ~ 1.5))
+
+p_coverage <- 
+  data_coverage_combined %>%
+  ggplot(aes(estimate, fct_rev(measure), color = domain, shape = domain)) +
+  geom_linerangeh(aes(xmin = ci_lower,
+                      xmax = ci_upper),
+                  position = position_dodge(width = 0.6)) + 
+  geom_point(aes(size = point_size), position = position_dodge(width = 0.6)) +
+  scale_color_manual(values = c("#000000", viridisLite::viridis(begin = 0.4, end = 0.8, n = 3))) +
+  scale_shape_manual(values = c(15, 16, 16, 16)) +
+  scale_size(range = c(1.5, 3), guide = "none") +
+  scale_x_continuous(breaks = c(0, .25, .5, .75, 1), 
+                     labels = c("0.00<br/>(Better)", "0.25", "0.50", "0.75", "1.00<br/>(Worse)"),
+                     limits = c(0,1)) +
+  mdthemes::md_theme_linedraw() +
+  labs(x = "Proportion of observed range covered <br/>by individual participants' 95% CIs",
+       y = "",
+       color = "Domain",
+       shape = "Domain") + 
+  # theme(legend.position = "top",
+  #       legend.title = element_blank()) +
+  theme(legend.position="none") +
+  guides(color = guide_legend(reverse = TRUE),
+         shape = guide_legend(reverse = TRUE))
+
+p_coverage
 
 ```
 
@@ -754,12 +860,12 @@ The results of three hierarchical/meta analytic models are presented below, all 
 
 Note that the theoretical max possible range of A scores is 0 to 1, but such extreme scores are practically impossible on some tasks. As such, in order to understand the CI width in terms of realistic data I standardize CI widths by the observed range of scores for each domain and measure. 
 
-```{r fig.height=7, fig.width=6}
+```{r fig.height=12, fig.width=6}
 
 p_combined <- 
-  p_prop_nonzero +
-  p_prop_discriminable + 
-  p_ci_width_proportion_observed_range +
+  p_nonzero +
+  p_discriminability + 
+  p_coverage +
   plot_layout(ncol = 1)
 
 p_combined
@@ -770,8 +876,8 @@ ggsave(filename  = "plots/figure_3_metaanalyses.pdf",
        # path      = NULL,
        # dpi       = 300,
        units     = "in",
-       width     = 5,
-       height    = 7,
+       width     = 6,
+       height    = 12,
        limitsize = TRUE)
 
 ```

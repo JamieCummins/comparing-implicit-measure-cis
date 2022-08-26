@@ -14,7 +14,8 @@ output:
 # TODO
 
 - add demographics? or rely on Bar-Anan and Nosek's descriptions?
-- finalize plots in combined plots section
+- finalize plots in combined plots section, remove "domain" from legend
+- rebootstrap EP data 
 
 ```{r, include=FALSE}
 knitr::opts_chunk$set(message=FALSE,
@@ -63,6 +64,8 @@ round_df <- function(df, n_digits = 3) {
 
 # Sample descriptives
 
+TODO
+
 ```{r}
 
 # data_outliers %>%
@@ -110,21 +113,21 @@ round_df <- function(df, n_digits = 3) {
 
 ```{r}
 
-# for development
-data_processed_testing <- read_rds("../../data/processed/data_processed_testing.rds") |>
+# for development, use a 10% training subset
+data_processed_training <- read_rds("../../data/processed/data_processed_training.rds") |>
   mutate(domain = as.factor(str_to_sentence(domain)),
-         measure = case_when(measure == "iat"   ~ "IAT",
-                             measure == "biat"  ~ "Brief IAT",
+         measure = case_when(measure == "iat"  ~ "IAT",
+                             measure == "biat" ~ "Brief IAT",
                              measure == "siat" ~ "SC-IAT",
-                             measure == "amp"   ~ "AMP",
-                             measure == "gnat"  ~ "GNAT",
-                             measure == "ept"   ~ "EPT"),
+                             measure == "amp"  ~ "AMP",
+                             measure == "gnat" ~ "GNAT",
+                             measure == "ept"  ~ "EPT"),
          measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))
 
-data_processed <- data_processed_testing
+data_processed <- data_processed_training
 percent_split <- "???"
 
-# # for realz
+# # for realz: use the remaining 90% as the testing set to make conclusions
 # data_processed_full <- read_rds("../../data/processed/data_processed.rds") |>
 #   mutate(domain = as.factor(str_to_sentence(domain)),
 #          measure = case_when(measure == "iat"   ~ "IAT",
@@ -136,14 +139,17 @@ percent_split <- "???"
 #          measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT")) |>
 #   drop_na()
 # 
+# # use only data that wasn't used for training
 # data_processed <- data_processed_full |>
-#   anti_join(data_processed_testing, by = c("session_id", "measure", "domain"))
+#   anti_join(data_processed_training, by = c("session_id", "measure", "domain"))
 # 
-# percent_split <- round_half_up(nrow(data_processed_testing)/nrow(data_processed_full)*100, 0)
+# write_rds(data_processed, "../../data/processed/data_processed_testing.rds")
+# 
+# percent_split <- round_half_up(nrow(data_processed_training)/nrow(data_processed_full)*100, 0)
 
 ```
 
-The "training" dataset which we used to refine the code with was `r percent_split`% of the full dataset.
+The "training" data set which we used to refine the code with was `r percent_split`% of the full dataset. Results are reported from the remaining `r 1-percent_split`% testing data set.
 
 # Caterpillar plot
 

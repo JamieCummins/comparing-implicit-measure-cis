@@ -13,6 +13,7 @@ output:
 
 # TODO
 
+- why are some point estimates missing from plots?
 - add demographics? or rely on Bar-Anan and Nosek's descriptions?
 - when switching from training to testing, make sure we delete contents of results/ !! 
 
@@ -168,7 +169,7 @@ p_cis_by_domain <-
         legend.position = "top") +
   scale_color_viridis_d(end = 0.6, direction = -1) +
   xlab("Ranked participant") +
-  ylab("A score") +
+  ylab("PI score") +
   labs(color = "95% CI excludes zero point") +
   facet_grid(measure ~ domain)
 
@@ -346,7 +347,7 @@ p_nonzero
 
 ## Calculate scores
 
-Many have argued that the zero point is arbitrary and not a useful reference point. Instead of asking "what proportion of A scores are different from the neutral point (0.50)?", we could also ask "what proportion of A scores are different from one another?"
+Many have argued that the zero point is arbitrary and not a useful reference point. Instead of asking "what proportion of PI scores are different from the neutral point (0.50)?", we could also ask "what proportion of PI scores are different from one another?"
 
 A common way to assess whether for differences between two estimates is to assess for non overlap between their confidence intervals. However, it has been repeatedly pointed out that this is less than ideal: there are situations where confidence intervals overlap slightly and yet the difference in means is significant.
 
@@ -780,11 +781,11 @@ ggsave(filename  = "plots/figure_1_cis_by_domain.pdf",
 
 ## Plot 2
 
-The results of three hierarchical/meta analytic models are presented below, all of which provide information via different methods regarding how informative an individual participants' A scores are in terms of being able to state that they demonstrated evidence of a bias/effect/implicit attitude, whether that individual can be discriminated from other individuals in the same domain and on the same measure, and how much of the range of observed scores an individuals score's CI spans.  
+The results of three hierarchical/meta analytic models are presented below, all of which provide information via different methods regarding how informative an individual participants' PI scores are in terms of being able to state that they demonstrated evidence of a bias/effect/implicit attitude, whether that individual can be discriminated from other individuals in the same domain and on the same measure, and how much of the range of observed scores an individuals score's CI spans.  
 
-(1) a meta-analysis of the proportion of participants that show non-zero scores (i.e., whose A scores' 95% CIs exclude zero), (2) the proportion of scores that are discriminable from one another. Pairwise comparisons are made between all participants' scores within a domain and measure, and the proportion that lie outside one-another's CIs can be inferred to be different from one another (i.e., are discriminable as different from one another). This analysis is useful because it avoids the issue or debate around how meaningful a score's zero point is (i.e., A = 0.50) or whether it is a meaningful reference point. That is, previous research has argued that A = 0.50 cannot be inferred to represent no bias. Discriminability is agnostic to any individual comparison point and avoids this issue. (3) A meta analysis of the ratio between each participants' score and the maximum observed range of scores for that domain and measure. I.e., given the observed range of scores across participants, what proportion of that range did each individual participant's score's Confidence Interval span. If each individual's CIs are compatible with a large proportion of the total range of all observed scores, then each score is so poorly estimated as to tell us very little about where on the spectrum each participant lies.
+(1) a meta-analysis of the proportion of participants that show non-zero scores (i.e., whose PI scores' 95% CIs exclude zero), (2) the proportion of scores that are discriminable from one another. Pairwise comparisons are made between all participants' scores within a domain and measure, and the proportion that lie outside one-another's CIs can be inferred to be different from one another (i.e., are discriminable as different from one another). This analysis is useful because it avoids the issue or debate around how meaningful PI score's zero point is (i.e., A = 0.50) or whether it is a meaningful reference point. That is, previous research has argued that A = 0.50 cannot be inferred to represent no bias. Discriminability is agnostic to any individual comparison point and avoids this issue. (3) A meta analysis of the ratio between each participants' score and the maximum observed range of scores for that domain and measure. I.e., given the observed range of scores across participants, what proportion of that range did each individual participant's score's Confidence Interval span. If each individual's CIs are compatible with a large proportion of the total range of all observed scores, then each score is so poorly estimated as to tell us very little about where on the spectrum each participant lies.
 
-Note that the theoretical max possible range of A scores is 0 to 1, but such extreme scores are practically impossible on some tasks. As such, in order to understand the CI width in terms of realistic data I standardize CI widths by the observed range of scores for each domain and measure.
+Note that the theoretical max possible range of PI scores is 0 to 1, but such extreme scores are practically impossible on some tasks. As such, in order to understand the CI width in terms of realistic data I standardize CI widths by the observed range of scores for each domain and measure.
 
 ```{r fig.height=12, fig.width=6}
 

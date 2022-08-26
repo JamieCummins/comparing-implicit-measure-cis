@@ -14,7 +14,6 @@ output:
 # TODO
 
 - add demographics? or rely on Bar-Anan and Nosek's descriptions?
-- re-bootstrap EP data
 
 ```{r, include=FALSE}
 knitr::opts_chunk$set(message=FALSE,
@@ -42,6 +41,7 @@ library(janitor)
 
 # create necessary directories
 dir.create("../../data/results")
+dir.create("plots")
 
 # set seed for reproducibility
 set.seed(42)
@@ -144,7 +144,9 @@ percent_split <- "???"
 
 The "training" data set which we used to refine the code with was `r percent_split`% of the full dataset. Results are reported from the remaining `r 1-percent_split`% testing data set.
 
-# Caterpillar plot
+# RQ1. Proportion of indiviudal scores that are detectably different from zero
+
+## Caterpillar plot
 
 ```{r fig.height=7, fig.width=6}
 
@@ -172,56 +174,6 @@ p_cis_by_domain <-
 p_cis_by_domain
 
 ```
-
-# CI widths
-
-Not meta analyzed as extreme skew in data means that residuals are very non-normal, violating assumptions and underestimating MAP estimates. Instead I simply present MAP estimates.
-
-## MAP CI width
-
-```{r}
-
-data_map_ci_widths <- data_processed %>%
-  group_by(domain, measure) %>%
-  do(point_estimate(.$ci_width, centrality = "MAP")) %>%
-  ungroup()
-
-data_map_ci_widths %>%
-  pivot_wider(names_from = measure, values_from = MAP) %>%
-  round_df(2) %>%
-  kable() %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
-
-```
-
-## Plot by domain and measure
-
-```{r}
-
-data_ci_width_map <- data_processed %>%
-  group_by(domain, measure) %>%
-  do(point_estimate(.$ci_width, centrality = "MAP")) %>%
-  ungroup() %>%
-  mutate(domain = fct_rev(domain))
-
-# plot
-p_ci_widths <-
-  ggplot(data_ci_width_map, aes(MAP, fct_rev(measure), color = domain, shape = domain)) +
-  geom_point(position = position_dodge(width = 0.75)) +
-  scale_shape_manual(values = c(17, 16, 15, 19)) +
-  scale_color_viridis_d(begin = 0.2, end = 0.8, direction = -1) +
-  mdthemes::md_theme_linedraw() +
-  labs(x = "Highest probability (MAP) 95% CI width",
-       y = "",
-       color = "Domain",
-       shape = "Domain") +
-  theme(legend.position = "top")
-
-p_ci_widths
-
-```
-
-# RQ1. Proportion different from zero
 
 ## Calculate scores
 
@@ -390,7 +342,7 @@ p_nonzero
 
 ```
 
-# RQ2. Proportion different from one another
+# RQ2. Probability that differences can be detected between two participants' scores
 
 Note: Discriminability between a score and zero can be determined using the CI, because zero is a known value and only the score is measured with uncertainty. However, discriminability between two scores must take into account the uncertainty in the estimation of both scores. Weir (2005) argues that such an interval can be estimated by expanding the CIs by sqrt(2). Here I refer to these intervals as Discriminability Intervals (DIs).
 
@@ -641,7 +593,7 @@ p_discriminability
 
 ```
 
-# CI widths as a proportion of observed range
+# RQ3. Proportion of observed range of 95% CI widths covered by individual participants' 95% CIs
 
 NB observed range of confidence intervals
 
@@ -816,8 +768,6 @@ Plot 1 is merely illustrative. It shows the bootstrapped CIs for all participant
 
 p_cis_by_domain
 
-dir.create("plots")
-
 ggsave(filename  = "plots/figure_1_cis_by_domain.pdf",
        plot      = p_cis_by_domain,
        device    = "pdf",
@@ -831,28 +781,6 @@ ggsave(filename  = "plots/figure_1_cis_by_domain.pdf",
 ```
 
 ## Plot 2
-
-Most probable CI width for A scores.
-
-NB I elected not to meta-analyze these widths as they demonstrate very large skew at the individual level, which violate the assumptions of linear meta-analysis and underestimate the typical width (ie estimated mean widths << MAP observed widths). Rather than meta analyze, I simply report the domain and measure level MAP values. More informative and valid analyses are presented below.
-
-```{r}
-
-p_ci_widths
-
-ggsave(filename  = "plots/figure_2_ci_widths.pdf",
-       plot      = p_ci_widths,
-       device    = "pdf",
-       # path      = NULL,
-       # dpi       = 300,
-       units     = "in",
-       width     = 4,
-       height    = 3,
-       limitsize = TRUE)
-
-```
-
-## Plot 3
 
 The results of three hierarchical/meta analytic models are presented below, all of which provide information via different methods regarding how informative an individual participants' A scores are in terms of being able to state that they demonstrated evidence of a bias/effect/implicit attitude, whether that individual can be discriminated from other individuals in the same domain and on the same measure, and how much of the range of observed scores an individuals score's CI spans.  
 
@@ -870,7 +798,7 @@ p_combined <-
 
 p_combined
 
-ggsave(filename  = "plots/figure_3_metaanalyses.pdf",
+ggsave(filename  = "plots/figure_2_metaanalyses.pdf",
        plot      = p_combined,
        device    = "pdf",
        # path      = NULL,

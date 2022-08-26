@@ -14,7 +14,8 @@ output:
 # TODO
 
 - add demographics? or rely on Bar-Anan and Nosek's descriptions?
-- finalize plots in combined plots section
+- finalize plots in combined plots section, remove "domain" from legend
+- rebootstrap EP data 
 
 ```{r, include=FALSE}
 knitr::opts_chunk$set(message=FALSE,

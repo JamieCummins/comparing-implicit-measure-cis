@@ -14,6 +14,7 @@ output:
 # TODO
 
 - add demographics? or rely on Bar-Anan and Nosek's descriptions?
+- when switching from training to testing, make sure we delete contents of results/ !! 
 
 ```{r, include=FALSE}
 knitr::opts_chunk$set(message=FALSE,
@@ -106,40 +107,38 @@ TODO
 
 ```{r}
 
-# for development, use a 10% training subset
-data_processed_training <- read_rds("../../data/processed/data_processed_training.rds") |>
-  mutate(domain = as.factor(str_to_sentence(domain)),
-         measure = case_when(measure == "iat"  ~ "IAT",
-                             measure == "biat" ~ "Brief IAT",
-                             measure == "siat" ~ "SC-IAT",
-                             measure == "amp"  ~ "AMP",
-                             measure == "gnat" ~ "GNAT",
-                             measure == "ept"  ~ "EPT"),
-         measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))
+# #run the following only the first time to split the data in a reproducible way
+# # split data for training and testing
+# data_processed_all <- read_rds("../../data/processed/data_processed.rds") |>
+#   mutate(domain = as.factor(str_to_sentence(domain)),
+#          measure = case_when(measure == "iat"  ~ "IAT",
+#                              measure == "biat" ~ "Brief IAT",
+#                              measure == "siat" ~ "SC-IAT",
+#                              measure == "amp"  ~ "AMP",
+#                              measure == "gnat" ~ "GNAT",
+#                              measure == "ept"  ~ "EPT"),
+#          measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))
+# 
+# # for development, use a 10% training subset
+# data_processed_training <- data_processed_all |>
+#   group_by(domain, measure) |>
+#   sample_frac(0.1)
+# 
+# data_processed_testing <-
+#   anti_join(data_processed_all, data_processed_training, by = c("session_id", "domain", "measure"))
+# 
+# write_rds(data_processed_training, "../../data/processed/data_processed_training.rds")
+# write_rds(data_processed_testing, "../../data/processed/data_processed_testing.rds")
 
-data_processed <- data_processed_training
+
+# training/dev
+data_processed <- read_rds("../../data/processed/data_processed_training.rds")
 percent_split <- "???"
 reverse_percent_split <- "???"
 
-# # for realz: use the remaining 90% as the testing set to make conclusions
-# data_processed_full <- read_rds("../../data/processed/data_processed.rds") |>
-#   mutate(domain = as.factor(str_to_sentence(domain)),
-#          measure = case_when(measure == "iat"   ~ "IAT",
-#                              measure == "biat"  ~ "Brief IAT",
-#                              measure == "siat"  ~ "SC-IAT",
-#                              measure == "amp"   ~ "AMP",
-#                              measure == "gnat"  ~ "GNAT",
-#                              measure == "ept"   ~ "EPT"),
-#          measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT")) |>
-#   drop_na()
-#
-# # use only data that wasn't used for training
-# data_processed <- data_processed_full |>
-#   anti_join(data_processed_training, by = c("session_id", "measure", "domain"))
-#
-# write_rds(data_processed, "../../data/processed/data_processed_testing.rds")
-#
-# percent_split <- round_half_up(nrow(data_processed_training)/nrow(data_processed_full)*100, 0)
+# # # for realz: use the remaining 90% as the testing set to make conclusions
+# data_processed <- read_rds("../../data/processed/data_processed_testing.rds")
+# percent_split <- round_half_up(nrow(data_processed_training)/nrow(39958)*100, 0)
 # reverse_percent_split <- 1 - percent_split
 
 ```

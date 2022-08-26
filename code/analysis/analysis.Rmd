@@ -14,7 +14,7 @@ output:
 # TODO
 
 - add demographics? or rely on Bar-Anan and Nosek's descriptions?
-- re-bootstrap EP data 
+- re-bootstrap EP data
 
 ```{r, include=FALSE}
 knitr::opts_chunk$set(message=FALSE,
@@ -50,7 +50,7 @@ set.seed(42)
 options(knitr.table.format = "html") # necessary configuration of tables
 
 # disable scientific notation
-options(scipen = 999) 
+options(scipen = 999)
 
 
 # function to round all numeric vars in a data frame
@@ -69,12 +69,12 @@ TODO
 
 # data_descriptives <- data_outliers_removed %>%
 #   distinct(session_id, .keep_all = TRUE)
-# 
+#
 # data_descriptives %>%
 #   count(domain, measure) %>%
 #   kable() %>%
 #   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
-# 
+#
 # data_descriptives %>%
 #   count(domain, measure) %>%
 #   summarize(total_n = sum(n),
@@ -85,7 +85,7 @@ TODO
 #   gather() %>%
 #   kable() %>%
 #   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
-# 
+#
 # data_descriptives %>%
 #   summarize(min_age  = round(min(age, na.rm = TRUE), 2),
 #             max_age  = round(max(age, na.rm = TRUE), 2),
@@ -94,7 +94,7 @@ TODO
 #   gather() %>%
 #   kable() %>%
 #   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
-# 
+#
 # data_descriptives %>%
 #   count(gender) %>%
 #   kable() %>%
@@ -131,13 +131,13 @@ percent_split <- "???"
 #                              measure == "ept"   ~ "EPT"),
 #          measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT")) |>
 #   drop_na()
-# 
+#
 # # use only data that wasn't used for training
 # data_processed <- data_processed_full |>
 #   anti_join(data_processed_training, by = c("session_id", "measure", "domain"))
-# 
+#
 # write_rds(data_processed, "../../data/processed/data_processed_testing.rds")
-# 
+#
 # percent_split <- round_half_up(nrow(data_processed_training)/nrow(data_processed_full)*100, 0)
 
 ```
@@ -148,7 +148,7 @@ The "training" data set which we used to refine the code with was `r percent_spl
 
 ```{r fig.height=7, fig.width=6}
 
-p_cis_by_domain <- 
+p_cis_by_domain <-
   data_processed %>%
   arrange(estimate) %>%
   group_by(domain, measure) %>%
@@ -166,7 +166,7 @@ p_cis_by_domain <-
   scale_color_viridis_d(end = 0.6, direction = -1) +
   xlab("Ranked participant") +
   ylab("A score") +
-  labs(color = "95% CI excludes zero point") + 
+  labs(color = "95% CI excludes zero point") +
   facet_grid(measure ~ domain)
 
 p_cis_by_domain
@@ -175,7 +175,7 @@ p_cis_by_domain
 
 # CI widths
 
-Not meta analyzed as extreme skew in data means that residuals are very non-normal, violating assumptions and underestimating MAP estimates. Instead I simply present MAP estimates. 
+Not meta analyzed as extreme skew in data means that residuals are very non-normal, violating assumptions and underestimating MAP estimates. Instead I simply present MAP estimates.
 
 ## MAP CI width
 
@@ -202,11 +202,11 @@ data_ci_width_map <- data_processed %>%
   group_by(domain, measure) %>%
   do(point_estimate(.$ci_width, centrality = "MAP")) %>%
   ungroup() %>%
-  mutate(domain = fct_rev(domain)) 
+  mutate(domain = fct_rev(domain))
 
 # plot
-p_ci_widths <- 
-  ggplot(data_ci_width_map, aes(MAP, fct_rev(measure), color = domain, shape = domain)) + 
+p_ci_widths <-
+  ggplot(data_ci_width_map, aes(MAP, fct_rev(measure), color = domain, shape = domain)) +
   geom_point(position = position_dodge(width = 0.75)) +
   scale_shape_manual(values = c(17, 16, 15, 19)) +
   scale_color_viridis_d(begin = 0.2, end = 0.8, direction = -1) +
@@ -214,20 +214,20 @@ p_ci_widths <-
   labs(x = "Highest probability (MAP) 95% CI width",
        y = "",
        color = "Domain",
-       shape = "Domain") + 
+       shape = "Domain") +
   theme(legend.position = "top")
-  
+
 p_ci_widths
 
 ```
 
-# Proportion different from zero
+# RQ1. Proportion different from zero
 
 ## Calculate scores
 
 ```{r}
 
-data_diff_zero <- 
+data_diff_zero <-
   data_processed %>%
   mutate(domain = as.factor(domain)) %>%
   group_by(domain, measure) %>%
@@ -237,7 +237,7 @@ data_diff_zero <-
   # logit transform for analysis
   mutate(proportion_diff_zero_logit = boot::logit(proportion_diff_zero)) %>%
   filter(!(proportion_diff_zero == 0 & variance == 0)) %>%
-  mutate(variance = ifelse(variance == 0, 0.0001, variance)) 
+  mutate(variance = ifelse(variance == 0, 0.0001, variance))
 
 ```
 
@@ -245,13 +245,13 @@ data_diff_zero <-
 
 ```{r}
 
-p_nonzero_domains <- 
+p_nonzero_domains <-
   data_diff_zero %>%
   mutate(domain = fct_reorder(domain, proportion_diff_zero, .fun = mean)) %>%
   ggplot(aes(proportion_diff_zero, fct_rev(measure), color = domain, shape = domain)) +
   geom_linerangeh(aes(xmin = proportion_diff_zero - sqrt(variance)*1.96,
                       xmax = proportion_diff_zero + sqrt(variance)*1.96),
-                  position = position_dodge(width = 0.5)) + 
+                  position = position_dodge(width = 0.5)) +
   geom_point(position = position_dodge(width = 0.5)) +
   scale_shape_manual(values = c(17, 16, 15, 19)) +
   scale_color_viridis_d(begin = 0.2, end = 0.8, direction = -1) +
@@ -259,7 +259,7 @@ p_nonzero_domains <-
   labs(x = "Proportion of participants<br/>with non-zero effects",
        y = "",
        color = "Domain",
-       shape = "Domain") + 
+       shape = "Domain") +
   theme(legend.position = "top") +
   xlim(0, 1)
 
@@ -274,26 +274,26 @@ p_nonzero_domains
 # fit model
 fit_diff_zero <-
   lmer(proportion_diff_zero_logit ~ 1 + measure + (1 | domain),
-       weights = 1/variance, 
+       weights = 1/variance,
        data = data_diff_zero)
 
 # extract re Tau
 results_re_tau_diff_zero <- fit_diff_zero %>%
   merTools::REsdExtract() %>%
   as_tibble(rownames = "domain") %>%
-  rename(tau = value) 
+  rename(tau = value)
 
 # extract marginal means
-results_diff_zero <- 
+results_diff_zero <-
   summary(emmeans(fit_diff_zero, ~ measure)) %>%
   dplyr::select(measure, estimate = emmean, se = SE, ci_lower = lower.CL, ci_upper = upper.CL) %>%
-  mutate(pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)), 
+  mutate(pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)),
          pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2))) |>
   select(-se) |>
   mutate_if(is.numeric, boot::inv.logit)
 
 # plot
-p_nonzero_meta <- 
+p_nonzero_meta <-
   ggplot(results_diff_zero, aes(fct_rev(measure), estimate)) +
   #geom_linerange(aes(ymin = pi_lower, ymax = pi_upper), size = 0.5, linetype = "solid") +
   geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
@@ -301,7 +301,7 @@ p_nonzero_meta <-
   mdthemes::md_theme_linedraw() +
   scale_y_continuous(breaks = c(0, .25, .5, .75, 1), labels = c("0.00<br/>(Worse)", "0.25", "0.50", "0.75", "1.00<br/>(Better)")) +
   labs(x = "",
-       y = "Proportion of participants<br/>with non-zero effects<br/>") + 
+       y = "Proportion of participants<br/>with non-zero effects<br/>") +
   theme(legend.position = "none") +
   coord_flip(ylim = c(0, 1))
 
@@ -313,7 +313,7 @@ results_diff_zero %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 # tests
-data_emms_diff_zero <- emmeans(fit_diff_zero, list(pairwise ~ measure), adjust = "holm") 
+data_emms_diff_zero <- emmeans(fit_diff_zero, list(pairwise ~ measure), adjust = "holm")
 
 summary(data_emms_diff_zero)$`pairwise differences of measure` %>%
   as.data.frame() %>%
@@ -328,7 +328,7 @@ summary(data_emms_diff_zero)$`pairwise differences of measure` %>%
 
 ```{r}
 
-data_diff_zero_combined <- 
+data_diff_zero_combined <-
   bind_rows(results_diff_zero %>%
               mutate(domain = "Meta-analysis"),
             data_diff_zero %>%
@@ -339,12 +339,12 @@ data_diff_zero_combined <-
          point_size = case_when(domain == "Meta-analysis" ~ 3,
                                 TRUE ~ 1.5))
 
-# p_nonzero <- 
+# p_nonzero <-
 #   data_diff_zero_combined %>%
 #   ggplot(aes(fct_rev(measure), estimate, color = domain, shape = domain)) +
 #   geom_linerange(aes(ymin = ci_lower,
 #                      ymax = ci_upper),
-#                  position = position_dodge(width = 0.6)) + 
+#                  position = position_dodge(width = 0.6)) +
 #   geom_point(aes(size = point_size), position = position_dodge(width = 0.6)) +
 #   scale_color_manual(values = c("#000000", viridisLite::viridis(begin = 0.4, end = 0.8, n = 3))) +
 #   scale_shape_manual(values = c(15, 16, 16, 16)) +
@@ -355,24 +355,24 @@ data_diff_zero_combined <-
 #   labs(x = "",
 #        y = "Proportion of participants<br/>with non-zero effects",
 #        color = "Domain",
-#        shape = "Domain") + 
+#        shape = "Domain") +
 #   theme(legend.position = "top",
 #         legend.title = element_blank()) +
 #   guides(color = guide_legend(reverse = TRUE),
 #          shape = guide_legend(reverse = TRUE)) +
 #   ylim(0, 1)
 
-p_nonzero <- 
+p_nonzero <-
   data_diff_zero_combined %>%
   ggplot(aes(estimate, fct_rev(measure), color = domain, shape = domain)) +
   geom_linerangeh(aes(xmin = ci_lower,
                       xmax = ci_upper),
-                  position = position_dodge(width = 0.6)) + 
+                  position = position_dodge(width = 0.6)) +
   geom_point(aes(size = point_size), position = position_dodge(width = 0.6)) +
   scale_color_manual(values = c("#000000", viridisLite::viridis(begin = 0.4, end = 0.8, n = 3))) +
   scale_shape_manual(values = c(15, 16, 16, 16)) +
   scale_size(range = c(1.5, 3), guide = "none") +
-  scale_x_continuous(breaks = c(0, .25, .5, .75, 1), 
+  scale_x_continuous(breaks = c(0, .25, .5, .75, 1),
                      labels = c("0.00<br/>(Worse)", "0.25", "0.50", "0.75", "1.00<br/>(Better)"),
                      limits = c(0,1)) +
   #coord_flip(ylim = c(0, 1)) +
@@ -380,7 +380,7 @@ p_nonzero <-
   labs(x = "Proportion of participants<br/>with non-zero effects",
        y = "",
        color = "Domain",
-       shape = "Domain") + 
+       shape = "Domain") +
   theme(legend.position = "top",
         legend.title = element_blank()) +
   guides(color = guide_legend(reverse = TRUE),
@@ -390,7 +390,7 @@ p_nonzero
 
 ```
 
-# Proportion different from one another
+# RQ2. Proportion different from one another
 
 Note: Discriminability between a score and zero can be determined using the CI, because zero is a known value and only the score is measured with uncertainty. However, discriminability between two scores must take into account the uncertainty in the estimation of both scores. Weir (2005) argues that such an interval can be estimated by expanding the CIs by sqrt(2). Here I refer to these intervals as Discriminability Intervals (DIs).
 
@@ -398,7 +398,7 @@ Note: Discriminability between a score and zero can be determined using the CI, 
 
 Many have argued that the zero point is arbitrary and not a useful reference point. Instead of asking "what proportion of A scores are different from the neutral point (0.50)?", we could also ask "what proportion of A scores are different from one another?"
 
-A common way to assess whether for differences between two estimates is to assess for non overlap between their confidence intervals. However, it has been repeatedly pointed out that this is less than ideal: there are situations where confidence intervals overlap slightly and yet the difference in means is significant. 
+A common way to assess whether for differences between two estimates is to assess for non overlap between their confidence intervals. However, it has been repeatedly pointed out that this is less than ideal: there are situations where confidence intervals overlap slightly and yet the difference in means is significant.
 
 Cornell Statistical Consulting Unit (2008) [Overlapping Confidence Intervals and Statistical
 Significance](https://cscu.cornell.edu/wp-content/uploads/73_ci.pdf) argue this clearly. From their whitepaper:
@@ -426,65 +426,65 @@ As such, it is more appropriate and liberal to test for differences between each
   # the below solution is to use expand.grid to find all combinations of a row with itself, and then use the modulus of the length of the row to filter out the self-pairings. Then do mutates on the rows to assess significant differences. It's enough to then summarize the proportion of significant results across all participants.
 discriminability <- function(data, i) {
   data_with_indexes <- data[i,] # boot function requires data and index
-  
+
   grid_estimates <- expand.grid(data_with_indexes$estimate, data_with_indexes$estimate) |>
     mutate(diff = Var1 - Var2,
            row_number = row_number(),
            modulus = row_number %% (nrow(data_with_indexes)+1)) |>
     filter(modulus != 1) |>
     select(diff)
-  
+
   grid_se <- expand.grid(data_with_indexes$se, data_with_indexes$se) |>
     mutate(critical_value = 1.96 * sqrt(Var1^2 + Var2^2),
            row_number = row_number(),
            modulus = row_number %% (nrow(data_with_indexes)+1)) |>
     filter(modulus != 1) |>
     select(critical_value)
-  
-  proportion_sig_diff <- 
+
+  proportion_sig_diff <-
     bind_cols(grid_estimates, grid_se) |>
     mutate(sig = abs(diff) > critical_value) |>
     summarize(proportion_sig_diff = mean(sig)) |>
     pull(proportion_sig_diff)
-  
+
   return(proportion_sig_diff)
 }
 
 bootstrap_discriminability <- function(data){
-  
+
   require(dplyr)
   require(boot)
-  
-  fit <- 
-    boot::boot(data      = data, 
-               statistic = discriminability, 
+
+  fit <-
+    boot::boot(data      = data,
+               statistic = discriminability,
                R         = 2000,
-               sim       = "ordinary", 
+               sim       = "ordinary",
                stype     = "i",
-               parallel  = "multicore", 
+               parallel  = "multicore",
                ncpus     = parallel::detectCores())
-  
+
   results <- boot::boot.ci(fit, conf = 0.95, type = c("perc"))
-  
-  output <- 
+
+  output <-
     tibble(
       estimate = fit$t0,
       ci_lower = results$percent[4],
       ci_upper = results$percent[5]
     )
-  
+
   return(output)
 }
 
 # bootstrapping has a long execution time, so load saved values if they've already been calculated
 if(file.exists("../../data/results/data_discriminability.csv")) {
-  
+
   data_discriminability <- read_csv("../../data/results/data_discriminability.csv") |>
     mutate(measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))
-  
+
 } else {
-  
-  # bootstrap D scores 
+
+  # bootstrap D scores
   data_discriminability <- data_processed |>
     mutate(se = (ci_upper - ci_lower)/(1.96*2)) |>
     select(session_id, domain, measure, estimate, se) |>
@@ -499,13 +499,13 @@ if(file.exists("../../data/results/data_discriminability.csv")) {
     mutate(variance = ifelse(variance == 0, 0.0001, variance)) |>
     # model cannot be run on zero variance or 0 or 1 logit, so offset by a minuscule amount
     mutate(
-      proportion_discriminable_temp = case_when(proportion_discriminable < 0.001 ~ 0.001, 
+      proportion_discriminable_temp = case_when(proportion_discriminable < 0.001 ~ 0.001,
                                                 proportion_discriminable > 0.999 ~ 0.999,
                                                 TRUE ~ proportion_discriminable),
       proportion_discriminable_logit = boot::logit(proportion_discriminable_temp)
     ) %>%
     select(-proportion_discriminable_temp)
-  
+
   # save to disk
   write_csv(data_discriminability, "../../data/results/data_discriminability.csv")
 
@@ -517,14 +517,14 @@ if(file.exists("../../data/results/data_discriminability.csv")) {
 
 ```{r}
 
-p_discriminability_domains <- 
+p_discriminability_domains <-
   data_discriminability %>%
   mutate(domain = fct_rev(factor(domain)),
          measure = fct_rev(fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))) %>%
   ggplot(aes(proportion_discriminable, measure, color = domain, shape = domain)) +
   geom_linerangeh(aes(xmin = proportion_discriminable - sqrt(variance)*1.96,
                       xmax = proportion_discriminable + sqrt(variance)*1.96),
-                  position = position_dodge(width = 0.5)) + 
+                  position = position_dodge(width = 0.5)) +
   geom_point(position = position_dodge(width = 0.5)) +
   scale_shape_manual(values = c(17, 16, 15, 19)) +
   scale_color_viridis_d(begin = 0.2, end = 0.8, direction = -1) +
@@ -532,7 +532,7 @@ p_discriminability_domains <-
   labs(x = "Probability that differences can be detected<br/>between two participants' scores",
        y = "",
        color = "Domain",
-       shape = "Domain") + 
+       shape = "Domain") +
   theme(legend.position = "top",
         panel.spacing = unit(1.5, "lines")) +
   coord_cartesian(xlim = c(0,1))
@@ -546,16 +546,16 @@ p_discriminability_domains
 ```{r}
 
 # fit meta analytic model
-fit_disciminability <- 
-  lmer(proportion_discriminable_logit ~ 1 + measure + (1 | domain), 
-       weights = 1/variance, 
+fit_disciminability <-
+  lmer(proportion_discriminable_logit ~ 1 + measure + (1 | domain),
+       weights = 1/variance,
        data = data_discriminability)
 
 # extract re Tau
 results_re_tau_disciminability <- fit_disciminability %>%
   merTools::REsdExtract() %>%
   as_tibble(rownames = "measure") %>%
-  rename(tau = value) 
+  rename(tau = value)
 
 # extract marginal means
 results_disciminability <-
@@ -565,7 +565,7 @@ results_disciminability <-
          pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_disciminability$tau^2))) |>
   select(-se) |>
   mutate_if(is.numeric, boot::inv.logit)
-  
+
 # plot
 p_discriminability_meta <-
   ggplot(results_disciminability, aes(fct_rev(measure), estimate)) +
@@ -581,7 +581,7 @@ p_discriminability_meta <-
   theme(legend.position = "none") +
   coord_flip(ylim = c(0, 1))
 
-p_discriminability_meta 
+p_discriminability_meta
 
 results_disciminability %>%
   round_df(2) %>%
@@ -589,7 +589,7 @@ results_disciminability %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 # tests
-data_emms_disciminability <- emmeans(fit_disciminability, list(pairwise ~ measure), adjust = "holm") 
+data_emms_disciminability <- emmeans(fit_disciminability, list(pairwise ~ measure), adjust = "holm")
 
 summary(data_emms_disciminability)$`pairwise differences of measure` %>%
   as.data.frame() %>%
@@ -604,7 +604,7 @@ summary(data_emms_disciminability)$`pairwise differences of measure` %>%
 
 ```{r}
 
-data_disciminability_combined <- 
+data_disciminability_combined <-
   bind_rows(results_disciminability %>%
               mutate(domain = "Meta-analysis"),
             data_discriminability %>%
@@ -613,24 +613,24 @@ data_disciminability_combined <-
          point_size = case_when(domain == "Meta-analysis" ~ 3,
                                 TRUE ~ 1.5))
 
-p_discriminability <- 
+p_discriminability <-
   data_disciminability_combined %>%
   ggplot(aes(estimate, fct_rev(measure), color = domain, shape = domain)) +
   geom_linerangeh(aes(xmin = ci_lower,
                       xmax = ci_upper),
-                  position = position_dodge(width = 0.6)) + 
+                  position = position_dodge(width = 0.6)) +
   geom_point(aes(size = point_size), position = position_dodge(width = 0.6)) +
   scale_color_manual(values = c("#000000", viridisLite::viridis(begin = 0.4, end = 0.8, n = 3))) +
   scale_shape_manual(values = c(15, 16, 16, 16)) +
   scale_size(range = c(1.5, 3), guide = "none") +
-  scale_x_continuous(breaks = c(0, .25, .5, .75, 1), 
+  scale_x_continuous(breaks = c(0, .25, .5, .75, 1),
                      labels = c("0.00<br/>(Worse)", "0.25", "0.50", "0.75", "1.00<br/>(Better)"),
                      limits = c(0,1)) +
   mdthemes::md_theme_linedraw() +
   labs(x = "Probability that differences can be detected<br/>between two participants' scores<br/>",
        y = "",
        color = "Domain",
-       shape = "Domain") + 
+       shape = "Domain") +
   # theme(legend.position = "top",
   #       legend.title = element_blank()) +
   theme(legend.position="none") +
@@ -649,15 +649,15 @@ NB observed range of confidence intervals
 
 ```{r}
 
-## calculate observed ranges 
+## calculate observed ranges
 observed_range_estimates <- data_processed %>%
   group_by(measure, domain) %>%
   dplyr::summarize(min = min(ci_lower, na.rm = TRUE),
                    max = max(ci_upper, na.rm = TRUE),
                    .groups = "drop") %>%
-  mutate(range = max - min) 
+  mutate(range = max - min)
 
-# calculate CI / range 
+# calculate CI / range
 data_ci_width_proportions <- data_processed %>%
   # join this data into the original data
   full_join(observed_range_estimates, by = c("measure", "domain")) %>%
@@ -674,7 +674,7 @@ data_ci_width_proportions <- data_processed %>%
                                                    ci_width_proportion_mean > 0.9999 ~ 0.9999,
                                                    TRUE ~ ci_width_proportion_mean),
          ci_width_proportion_mean_logit = boot::logit(ci_width_proportion_mean_temp)) %>%
-  select(-ci_width_proportion_mean_temp) 
+  select(-ci_width_proportion_mean_temp)
 
 ```
 
@@ -682,7 +682,7 @@ data_ci_width_proportions <- data_processed %>%
 
 ```{r}
 
-p_coverage_domains <- 
+p_coverage_domains <-
   data_ci_width_proportions %>%
   mutate(domain = fct_rev(factor(domain)),
          measure = fct_rev(fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))) %>%
@@ -690,14 +690,14 @@ p_coverage_domains <-
   geom_point(position = position_dodge(width = 0.5)) +
   geom_linerangeh(aes(xmin = ci_width_proportion_mean - sqrt(variance)*1.96,
                       xmax = ci_width_proportion_mean + sqrt(variance)*1.96),
-                  position = position_dodge(width = 0.5)) + 
+                  position = position_dodge(width = 0.5)) +
   scale_shape_manual(values = c(17, 16, 15, 19)) +
   scale_color_viridis_d(begin = 0.2, end = 0.8, direction = -1) +
   mdthemes::md_theme_linedraw() +
   labs(x = "Proportion of observed range covered<br/>by individual scores' 95% CIs",
        y = "",
        color = "Domain",
-       shape = "Domain") + 
+       shape = "Domain") +
   theme(legend.position = "top",
         panel.spacing = unit(1.5, "lines")) +
   coord_cartesian(xlim = c(0,1))
@@ -711,8 +711,8 @@ p_coverage_domains
 ```{r}
 
 # fit model
-fit_ci_width_proportions <- 
-  lmer(ci_width_proportion_mean_logit ~ 1 + measure + (1 | domain), 
+fit_ci_width_proportions <-
+  lmer(ci_width_proportion_mean_logit ~ 1 + measure + (1 | domain),
        weights = 1/variance,
        data = data_ci_width_proportions)
 
@@ -720,10 +720,10 @@ fit_ci_width_proportions <-
 results_re_tau_ci_width_proportions <- fit_ci_width_proportions %>%
   merTools::REsdExtract() %>%
   as_tibble(rownames = "measure") %>%
-  rename(tau = value) 
+  rename(tau = value)
 
 # extract marginal means
-results_ci_width_proportions <- 
+results_ci_width_proportions <-
   summary(emmeans(fit_ci_width_proportions, ~ measure)) %>%
   dplyr::select(measure, estimate = emmean, se = SE, ci_lower = lower.CL, ci_upper = upper.CL) %>%
   mutate(pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_ci_width_proportions$tau^2)),
@@ -732,7 +732,7 @@ results_ci_width_proportions <-
   mutate_if(is.numeric, boot::inv.logit)
 
 # plot
-p_coverage_meta <- 
+p_coverage_meta <-
   ggplot(results_ci_width_proportions, aes(fct_rev(measure), estimate)) +
   #geom_linerange(aes(ymin = pi_lower, ymax = pi_upper), size = 0.5, linetype = "solid") +
   geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
@@ -752,7 +752,7 @@ results_ci_width_proportions %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 # tests
-data_emms_ci_width_proportions <- emmeans(fit_ci_width_proportions, list(pairwise ~ measure), adjust = "holm") 
+data_emms_ci_width_proportions <- emmeans(fit_ci_width_proportions, list(pairwise ~ measure), adjust = "holm")
 
 summary(data_emms_ci_width_proportions)$`pairwise differences of measure` %>%
   as.data.frame() %>%
@@ -767,7 +767,7 @@ summary(data_emms_ci_width_proportions)$`pairwise differences of measure` %>%
 
 ```{r}
 
-data_coverage_combined <- 
+data_coverage_combined <-
   bind_rows(results_ci_width_proportions %>%
               mutate(domain = "Meta-analysis"),
             data_ci_width_proportions %>%
@@ -778,24 +778,24 @@ data_coverage_combined <-
          point_size = case_when(domain == "Meta-analysis" ~ 3,
                                 TRUE ~ 1.5))
 
-p_coverage <- 
+p_coverage <-
   data_coverage_combined %>%
   ggplot(aes(estimate, fct_rev(measure), color = domain, shape = domain)) +
   geom_linerangeh(aes(xmin = ci_lower,
                       xmax = ci_upper),
-                  position = position_dodge(width = 0.6)) + 
+                  position = position_dodge(width = 0.6)) +
   geom_point(aes(size = point_size), position = position_dodge(width = 0.6)) +
   scale_color_manual(values = c("#000000", viridisLite::viridis(begin = 0.4, end = 0.8, n = 3))) +
   scale_shape_manual(values = c(15, 16, 16, 16)) +
   scale_size(range = c(1.5, 3), guide = "none") +
-  scale_x_continuous(breaks = c(0, .25, .5, .75, 1), 
+  scale_x_continuous(breaks = c(0, .25, .5, .75, 1),
                      labels = c("0.00<br/>(Better)", "0.25", "0.50", "0.75", "1.00<br/>(Worse)"),
                      limits = c(0,1)) +
   mdthemes::md_theme_linedraw() +
   labs(x = "Proportion of observed range covered <br/>by individual participants' 95% CIs",
        y = "",
        color = "Domain",
-       shape = "Domain") + 
+       shape = "Domain") +
   # theme(legend.position = "top",
   #       legend.title = element_blank()) +
   theme(legend.position="none") +
@@ -832,9 +832,9 @@ ggsave(filename  = "plots/figure_1_cis_by_domain.pdf",
 
 ## Plot 2
 
-Most probable CI width for A scores. 
+Most probable CI width for A scores.
 
-NB I elected not to meta-analyze these widths as they demonstrate very large skew at the individual level, which violate the assumptions of linear meta-analysis and underestimate the typical width (ie estimated mean widths << MAP observed widths). Rather than meta analyze, I simply report the domain and measure level MAP values. More informative and valid analyses are presented below. 
+NB I elected not to meta-analyze these widths as they demonstrate very large skew at the individual level, which violate the assumptions of linear meta-analysis and underestimate the typical width (ie estimated mean widths << MAP observed widths). Rather than meta analyze, I simply report the domain and measure level MAP values. More informative and valid analyses are presented below.
 
 ```{r}
 
@@ -856,15 +856,15 @@ ggsave(filename  = "plots/figure_2_ci_widths.pdf",
 
 The results of three hierarchical/meta analytic models are presented below, all of which provide information via different methods regarding how informative an individual participants' A scores are in terms of being able to state that they demonstrated evidence of a bias/effect/implicit attitude, whether that individual can be discriminated from other individuals in the same domain and on the same measure, and how much of the range of observed scores an individuals score's CI spans.  
 
-(1) a meta-analysis of the proportion of participants that show non-zero scores (i.e., whose A scores' 95% CIs exclude zero), (2) the proportion of scores that are discriminable from one another. Pairwise comparisons are made between all participants' scores within a domain and measure, and the proportion that lie outside one-another's CIs can be inferred to be different from one another (i.e., are discriminable as different from one another). This analysis is useful because it avoids the issue or debate around how meaningful a score's zero point is (i.e., A = 0.50) or whether it is a meaningful reference point. That is, previous research has argued that A = 0.50 cannot be inferred to represent no bias. Discriminability is agnostic to any individual comparison point and avoids this issue. (3) A meta analysis of the ratio between each participants' score and the maximum observed range of scores for that domain and measure. I.e., given the observed range of scores across participants, what proportion of that range did each individual participant's score's Confidence Interval span. If each individual's CIs are compatible with a large proportion of the total range of all observed scores, then each score is so poorly estimated as to tell us very little about where on the spectrum each participant lies. 
+(1) a meta-analysis of the proportion of participants that show non-zero scores (i.e., whose A scores' 95% CIs exclude zero), (2) the proportion of scores that are discriminable from one another. Pairwise comparisons are made between all participants' scores within a domain and measure, and the proportion that lie outside one-another's CIs can be inferred to be different from one another (i.e., are discriminable as different from one another). This analysis is useful because it avoids the issue or debate around how meaningful a score's zero point is (i.e., A = 0.50) or whether it is a meaningful reference point. That is, previous research has argued that A = 0.50 cannot be inferred to represent no bias. Discriminability is agnostic to any individual comparison point and avoids this issue. (3) A meta analysis of the ratio between each participants' score and the maximum observed range of scores for that domain and measure. I.e., given the observed range of scores across participants, what proportion of that range did each individual participant's score's Confidence Interval span. If each individual's CIs are compatible with a large proportion of the total range of all observed scores, then each score is so poorly estimated as to tell us very little about where on the spectrum each participant lies.
 
-Note that the theoretical max possible range of A scores is 0 to 1, but such extreme scores are practically impossible on some tasks. As such, in order to understand the CI width in terms of realistic data I standardize CI widths by the observed range of scores for each domain and measure. 
+Note that the theoretical max possible range of A scores is 0 to 1, but such extreme scores are practically impossible on some tasks. As such, in order to understand the CI width in terms of realistic data I standardize CI widths by the observed range of scores for each domain and measure.
 
 ```{r fig.height=12, fig.width=6}
 
-p_combined <- 
+p_combined <-
   p_nonzero +
-  p_discriminability + 
+  p_discriminability +
   p_coverage +
   plot_layout(ncol = 1)
 

@@ -6,5 +6,5 @@ Uses data from Bar-Anan, Y., Nosek, B.A. (2014) A comparative investigation of s
 
 ## Code
 
-Analysis code adapted from Hussey, I. (2020). The Implicit Relational Assessment Procedure is not suitable for individual use https://psyarxiv.com/w2ygr, code available here: https://github.com/ianhussey/cis-on-irap-d-scores
+Analysis code adapted from Hussey, I. (2020). The Implicit Relational Assessment Procedure is not suitable for individual use https://psyarxiv.com/w2ygr, code available [here](https://github.com/ianhussey/cis-on-irap-d-scores)
 

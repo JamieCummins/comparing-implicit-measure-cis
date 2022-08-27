@@ -1,5 +1,5 @@
 *.Rhistory
 *.DS_store
 old/*
-*~$
+~$*
 manuscript/~$nuscript.docx

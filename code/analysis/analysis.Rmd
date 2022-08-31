@@ -14,7 +14,6 @@ output:
 # TODO
 
 - add demographics? or rely on Bar-Anan and Nosek's descriptions?
-- when switching from training to testing, make sure we delete contents of "results/" !! 
 
 ```{r, include=FALSE}
 knitr::opts_chunk$set(message=FALSE,
@@ -132,14 +131,14 @@ TODO
 
 
 # training/dev
-data_processed <- read_rds("../../data/processed/data_processed_training.rds")
-percent_split <- "???"
-reverse_percent_split <- "???"
+#data_processed <- read_rds("../../data/processed/data_processed_training.rds")
+# percent_split <- "???"
+# reverse_percent_split <- "???"
 
-# # # for realz: use the remaining 90% as the testing set to make conclusions
-# data_processed <- read_rds("../../data/processed/data_processed_testing.rds")
-# percent_split <- round_half_up(nrow(data_processed_training)/nrow(39958)*100, 0)
-# reverse_percent_split <- 1 - percent_split
+# # for realz: use the remaining 90% as the testing set to make conclusions
+data_processed <- read_rds("../../data/processed/data_processed_testing.rds")
+percent_split <- 100 - round_half_up(nrow(data_processed)/39958*100, 0)
+reverse_percent_split <- 100 - percent_split
 
 ```
 

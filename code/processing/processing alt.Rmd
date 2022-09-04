@@ -295,7 +295,7 @@ A_score <- function(data, i) {
 }
 
 # A scores 
-A_scores <- all_exclusions_applied_df |>
+data_for_A_scores <- all_exclusions_applied_df |>
   rename(block_type = trial_consistency,
          user_id    = User_ID, 
          session_id = SESSION_ID) |>
@@ -308,8 +308,9 @@ A_scores <- all_exclusions_applied_df |>
   
   # remove those who do not have sufficient observations for both trials per measure
   group_by(session_id, domain, measure) |>
-  filter(n_distinct(block_type) == 2) |>
-  
+  filter(n_distinct(block_type) == 2)
+
+A_scores <- data_for_A_scores |>
   # do bootstrapping scores
   group_by(session_id, measure, domain) |>
   do(A_score(data = .)) |>

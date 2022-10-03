@@ -322,9 +322,6 @@ if(TRUE){
     mutate(sig = ifelse((ci_lower < 0.50 & ci_upper < 0.50) | (ci_lower > 0.50 & ci_upper > 0.50), TRUE, FALSE),
            ci_width = ci_upper - ci_lower) 
   
-  # save to disk
-  write_rds(A_scores, "../../data/processed/data_processed.rds")
-  
 }
 
 ```
@@ -339,39 +336,64 @@ A_score <- function(data) {
   nx <- length(x)
   ny <- length(y)
   rx <- sum(rank(c(x, y))[1:nx])
-  A <- (rx / nx - (nx + 1) / 2) / ny
+  A  <- (rx / nx - (nx + 1) / 2) / ny
   return(A)
 }
 
-split_half_scores <- critical_trials_complete_tasks |>
+# subset <- all_exclusions_applied_df |>
+#   distinct(SESSION_ID) |>
+#   slice(1:1000) |>
+#   pull(SESSION_ID)
+
+split_half_data <- all_exclusions_applied_df |>
+  #filter(SESSION_ID %in% subset) |>
   group_by(SESSION_ID, domain, measure) |>
   mutate(trial_n = row_number()) |>
   ungroup() |>
-  mutate(half = case_when(measure == "amp"  & trial_n <= 24 ~ "first",
-                          measure == "iat"  & trial_n <= 60 ~ "first",
-                          measure == "biat" & trial_n <= 64 ~ "first",
-                          measure == "siat" & trial_n <= 96 ~ "first",
-                          measure == "gnat" & trial_n <= 80 ~ "first",
-                          measure == "ept"  & trial_n <= 90 ~ "first",
-                          TRUE ~ "second")) |>
+  mutate(half = case_when(measure == "amp"  & trial_n <= 24 ~ "estimate_first_half",
+                          measure == "iat"  & trial_n <= 30 ~ "estimate_first_half",
+                          measure == "iat"  & trial_n  > 60 & trial_n <= 90 ~ "estimate_first_half",
+                          measure == "biat" & trial_n <= 64 ~ "estimate_first_half",
+                          measure == "siat" & trial_n <= 96 ~ "estimate_first_half",
+                          measure == "gnat" & trial_n <= 80 ~ "estimate_first_half",
+                          measure == "ept"  & trial_n <= 90 ~ "estimate_first_half",
+                          TRUE ~ "estimate_second_half")) |>
   mutate(session_id = as.factor(SESSION_ID),
          trial_consistency = as.character(trial_consistency)) |>
   
   # ensure a sufficient number of observations per person per measure per trial type
   group_by(session_id, measure, domain, trial_consistency, half) |>
   filter(n() >= 5) |>
-  
+
   # remove those who do not have sufficient observations for both trials per measure
   group_by(session_id, domain, measure) |>
   filter(n_distinct(trial_consistency) == 2) |>
-  ungroup() |>
-  group_by(session_id, measure, domain, half) %>%
-  summarize(score = A_score(.)) |>
   ungroup()
 
-split_half_scores_reshaped <- split_half_scores |>
+split_half_scores <- split_half_data |>
+  # calculate scores
+  group_by(session_id, measure, domain, half) %>%
+  do(score = A_score(.)) |>
+  ungroup() |>
+  mutate(score = as.numeric(score)) |>
+  mutate(score = ifelse(is.nan(score), NA, score),
+         score = ifelse(is.infinite(score), NA, score)) |>
   pivot_wider(names_from = half,
               values_from = score)
+
+```
+
+# write to disk
+
+```{r}
+
+data_processed <- 
+  full_join(A_scores, split_half_scores, by = c("session_id", "measure", "domain")) |>
+  rename(estimate_first_half = score_first_half,
+         estimate_second_half = score_second_half) |>
+  drop_na()
+
+write_rds(data_processed, "../../data/processed/data_processed.rds")
 
 ```
 

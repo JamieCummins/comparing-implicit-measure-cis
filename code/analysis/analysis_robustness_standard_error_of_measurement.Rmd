@@ -1,0 +1,247 @@
+---
+title: "Comparing 6 implicit measures' suitability for individual use"
+subtitle: "Robustness tests using the (arithmetic) Standard Error of Measurement to calculate Confidence Intervals instead of bootstrapping"
+author: "Ian Hussey"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    highlight: haddock
+    theme: flatly
+    toc: yes
+    toc_float: yes
+---
+
+# Overview 
+
+Reviewers of the manuscript examining confidence intervals on IAT and IRAP scores - which this project built on and reused much code - stated that they would have liked to see an arithmetic method as well as/instead of bootstrapping. I wasn't aware of a method at the time, but since became aware one: confidence intervals around individual's scores via the Standard Error of Measurement. Dudek (1979) defined this as $SEM = SD\sqrt{1 - \rho}$, where $SD$ refers to the standard deviation of scores on the measure and $\rho$ refers to the reliability of the measure. Intervals can then be formed as usual using $CI = estimate ± SEM*1.96$. 
+
+I implemented $\rho$ using split-half correlation between the first and second half of the task, with a Spearman-Brown correction applied. Notionally, test-retest reliability could also be used. This would likely produce lower estimates of $\rho$ and therefore wider intervals again. 
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(message=FALSE,
+                      warning=FALSE,
+                      cache.lazy=FALSE)
+```
+
+```{r}
+
+# dependencies
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+#library(boot)
+#library(parallel)
+#library(bayestestR)
+#library(patchwork)
+library(mdthemes)
+#library(lme4)
+#library(sjPlot)
+#library(emmeans)
+library(ggstance)
+#library(janitor)
+# library(merTools) called via merTools:: to avoid namespace collisions between MASS and dplyr
+
+# create necessary directories
+#dir.create("../../data/results")
+dir.create("plots")
+
+# set seed for reproducibility
+set.seed(42)
+
+# options
+options(knitr.table.format = "html") # necessary configuration of tables
+
+# disable scientific notation
+options(scipen = 999)
+
+
+# function to round all numeric vars in a data frame
+round_df <- function(df, n_digits = 3) {
+  require(janitor)
+  df %>% mutate_if(is.numeric, janitor::round_half_up, digits = n_digits)
+}
+
+```
+
+# Load scored data
+
+```{r}
+
+data_processed <- read_rds("../../data/processed/data_processed_testing.rds")
+
+```
+
+# Cronbach's alpha
+
+```{r}
+
+# alpha_tidy <- function(data){
+#   require(psych)
+#   
+#   res <- data |>
+#     select(estimate_first_half, estimate_second_half) |>
+#     psych::alpha()
+#   
+#   return(res$total$raw_alpha)
+# }
+# 
+# data_reliability <- data_processed |>
+#   group_by(measure, domain) %>%
+#   do(reliability = alpha_tidy(.)) |>
+#   mutate(reliability = as.numeric(reliability))
+# 
+# data_reliability |>
+#   round_df(2) |>
+#   kable() |>
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+spearman_brown_correction <- function(r_pearson) {
+  inversion <- ifelse(r_pearson < 0, -1, 1)
+  val <- 2*abs(r_pearson)/(1 + abs(r_pearson))
+  return(val*inversion)
+}
+
+data_reliability <- data_processed |>
+  group_by(measure, domain) %>%
+  summarize(cor = cor(x = estimate_first_half, y = estimate_second_half)) |>
+  ungroup() |>
+  mutate(reliability = spearman_brown_correction(cor)) |>
+  select(-cor)
+
+data_reliability |>
+  round_df(2) |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+```
+
+# Standard Error of Measurement
+
+Dudek (1979): $SEM = SD\sqrt{1 - \rho}$
+
+```{r}
+
+dat <- data_processed |>
+  left_join(data_reliability, by = c("domain", "measure")) |>
+  dplyr::select(session_id, measure, domain, estimate, ci_lower, ci_upper, sig, reliability) |>
+  group_by(measure, domain) |>
+  mutate(sem = sd(estimate) * sqrt(1 - reliability)) |>
+  ungroup() |>
+  dplyr::mutate(sem_ci_lower = estimate - (sem*1.96),
+                sem_ci_upper = estimate + (sem*1.96),
+                sem_sig = ifelse((sem_ci_lower > 0.5 & sem_ci_upper > 0.5) |
+                                   (sem_ci_lower < 0.5 & sem_ci_upper < 0.5), TRUE, FALSE),
+                se = (ci_upper - ci_lower)/(1.96*2)) |>
+  round_df(2)
+
+```
+
+# Caterpillar plots
+
+## Bootstrapped 95% CIs
+
+```{r fig.height=7, fig.width=6}
+
+p_cis_by_domain <-
+  data_processed %>%
+  arrange(estimate) %>%
+  group_by(domain, measure) %>%
+  mutate(ordered_id = row_number()/n()) %>%
+  ungroup() %>%
+  ggplot() +
+  geom_linerange(aes(x = ordered_id, ymin = ci_lower, ymax = ci_upper, color = sig),
+                 alpha = 1) +
+  geom_point(aes(ordered_id, estimate), size = 0.5, shape = "square") +
+  geom_hline(yintercept = 0.50, linetype = "dotted") +
+  mdthemes::md_theme_linedraw() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "top") +
+  scale_color_viridis_d(end = 0.6, direction = -1) +
+  xlab("Ranked participant") +
+  ylab("PI score") +
+  labs(color = "95% CI excludes zero point") +
+  facet_grid(measure ~ domain)
+
+p_cis_by_domain
+
+# ggsave(filename  = "plots/figure_1_cis_by_domain_new.pdf",
+#        plot      = p_cis_by_domain,
+#        device    = "pdf",
+#        # path      = NULL,
+#        # dpi       = 300,
+#        units     = "in",
+#        width     = 6,
+#        height    = 7,
+#        limitsize = TRUE)
+
+```
+
+## CIs from standard error of measurement
+
+Notice that the SEM's intervals do not vary between participants, as it is calculated from the sample SD and reliability. As such, intervals for some participants are impossible (i.e., are beyond the bounds of [0,1]).
+
+```{r fig.height=7, fig.width=6}
+
+p_cis_by_domain_sem <-
+  dat %>%
+  arrange(estimate) %>%
+  group_by(domain, measure) %>%
+  mutate(ordered_id = row_number()/n()) %>%
+  ungroup() %>%
+  ggplot() +
+  geom_linerange(aes(x = ordered_id, ymin = sem_ci_lower, ymax = sem_ci_upper, color = sem_sig),
+                 alpha = 1) +
+  geom_point(aes(ordered_id, estimate), size = 0.5, shape = "square") +
+  geom_hline(yintercept = 0.50, linetype = "dotted") +
+  mdthemes::md_theme_linedraw() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "top") +
+  scale_color_viridis_d(end = 0.6, direction = -1) +
+  #scale_y_continuous(lab = "")
+  xlab("Ranked participant") +
+  ylab("PI score") +
+  labs(color = "95% CI excludes zero point") +
+  facet_grid(measure ~ domain) +
+  coord_cartesian(ylim = c(0, 1))
+
+p_cis_by_domain_sem
+
+ggsave(filename  = "plots/figure_1_cis_by_domain_sem.pdf",
+       plot      = p_cis_by_domain_sem,
+       device    = "pdf",
+       # path      = NULL,
+       # dpi       = 300,
+       units     = "in",
+       width     = 6,
+       height    = 7,
+       limitsize = TRUE)
+
+```
+
+# Table
+
+Bootstrapping provided similar or narrower intervals in most cases. 
+
+```{r}
+
+dat |>
+  group_by(measure, domain) |>
+  dplyr::summarize(proportion_sig_boot = mean(sig, na.rm = TRUE),
+                   proportion_sig_sem = mean(sem_sig, na.rm = TRUE)) |>
+  mutate(diff = proportion_sig_sem - proportion_sig_boot) |>
+  round_df(2) |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+```
+
+# Session info
+
+```{r}
+
+sessionInfo()
+
+```

@@ -159,7 +159,7 @@ ggplot(results_beta_disciminability, aes(estimate, measure)) +
   scale_x_continuous(breaks = c(0, .25, .5, .75, 1), 
                      labels = c("0.00", "0.25", "0.50", "0.75", "1.00"),
                      limits = c(0,1)) +
-  labs(x = "Proportion of participants<br/>with non-zero effects",
+  labs(x = "Probability that differences can be detected<br/>between two participants' scores<br/>",
        y = "") +
   mdthemes::md_theme_linedraw() 
 
@@ -220,7 +220,7 @@ ggplot(results_beta_ci_width_proportions, aes(estimate, measure)) +
   scale_x_continuous(breaks = c(0, .25, .5, .75, 1), 
                      labels = c("0.00", "0.25", "0.50", "0.75", "1.00"),
                      limits = c(0,1)) +
-  labs(x = "Proportion of participants<br/>with non-zero effects",
+  labs(x = "Proportion of observed range covered <br/>by individual participants' 95% CIs",
        y = "") +
   mdthemes::md_theme_linedraw() 
 

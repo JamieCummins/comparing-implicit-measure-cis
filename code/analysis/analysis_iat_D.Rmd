@@ -1,0 +1,199 @@
+---
+title: "Comparing 6 implicit measures' suitability for individual use"
+author: "Ian Hussey"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    highlight: haddock
+    theme: flatly
+    toc: yes
+    toc_float: yes
+---
+
+# TODO
+
+- add demographics? or rely on Bar-Anan and Nosek's descriptions?
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(message=FALSE,
+                      warning=FALSE,
+                      cache.lazy=FALSE)
+```
+
+```{r}
+
+# dependencies
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(boot)
+library(parallel)
+library(bayestestR)
+library(patchwork)
+library(mdthemes)
+library(lme4)
+library(sjPlot)
+library(emmeans)
+library(ggstance)
+library(janitor)
+# library(merTools) called via merTools:: to avoid namespace collisions between MASS and dplyr
+
+# create necessary directories
+dir.create("../../data/results")
+dir.create("plots")
+
+# set seed for reproducibility
+set.seed(42)
+
+# options
+options(knitr.table.format = "html") # necessary configuration of tables
+
+# disable scientific notation
+options(scipen = 999)
+
+
+# function to round all numeric vars in a data frame
+round_df <- function(df, n_digits = 3) {
+  require(janitor)
+  df %>% mutate_if(is.numeric, janitor::round_half_up, digits = n_digits)
+}
+
+```
+
+# Load scored data
+
+```{r}
+
+# testing dataset A scored
+data_processed_A <- read_rds("../../data/processed/data_processed_testing.rds")
+
+data_processed_iat_D <- read_rds("../../data/processed/data_processed_iat_D.rds") |>
+  mutate(domain = as.factor(str_to_sentence(domain)),
+         measure = case_when(measure == "iat"  ~ "IAT",
+                             measure == "biat" ~ "Brief IAT",
+                             measure == "siat" ~ "SC-IAT",
+                             measure == "amp"  ~ "AMP",
+                             measure == "gnat" ~ "GNAT",
+                             measure == "ept"  ~ "EPT"),
+         measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))
+
+# retain only session_ids used in the A scored testing dataset
+data_processed <- data_processed_iat_D |>
+  semi_join(data_processed_A, by = c("session_id", "domain", "measure")) 
+
+```
+
+# RQ1. Proportion of indiviudal scores that are detectably different from zero
+
+## Caterpillar plot
+
+```{r fig.height=4.5, fig.width=6}
+
+p_cis_by_domain <-
+  data_processed %>%
+  arrange(estimate) %>%
+  group_by(domain, measure) %>%
+  mutate(ordered_id = row_number()/n()) %>%
+  ungroup() %>%
+  ggplot() +
+  geom_linerange(aes(x = ordered_id, ymin = ci_lower, ymax = ci_upper, color = sig),
+                 alpha = 1) +
+  geom_point(aes(ordered_id, estimate), size = 0.5, shape = "square") +
+  geom_hline(yintercept = 0, linetype = "dotted") +
+  mdthemes::md_theme_linedraw() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "top") +
+  scale_color_viridis_d(end = 0.6, direction = -1) +
+  xlab("Ranked participant") +
+  ylab("D score") +
+  labs(color = "95% CI excludes zero point") +
+  facet_grid(measure ~ domain)
+
+p_cis_by_domain
+
+```
+
+# Predictions
+
+```{r}
+
+dat <- data_processed |>
+  mutate(abs_estimate = abs(estimate)) |>
+  dplyr::select(measure, domain, abs_estimate, ci_width)
+  # group_by(domain, measure) |>
+  # summarize()
+
+ggplot(dat, aes(abs_estimate, ci_width)) +
+  geom_point(alpha = 0.25) +
+  facet_grid(measure ~ domain) +
+  geom_smooth(method = "lm", fullrange = TRUE)
+
+fit <- lmer(ci_width ~ abs_estimate * measure + (1 | domain),
+            data = dat)
+
+plot_model(fit, type = "int")
+
+# From inquisit race IAT script:
+# values.magnitude = "little to no";
+# 	if( abs(expressions.d) > 0.15 ) values.magnitude = "a slight";
+# 	if( abs(expressions.d) > 0.35 ) values.magnitude = "a moderate";
+# 	if( abs(expressions.d) >= 0.65 ) values.magnitude = "a strong";
+	
+dat_for_pred <- 
+  bind_rows(
+    mutate(distinct(dat, measure, domain), abs_estimate = 0.00),
+    mutate(distinct(dat, measure, domain), abs_estimate = 0.15),
+    mutate(distinct(dat, measure, domain), abs_estimate = 0.35),
+    mutate(distinct(dat, measure, domain), abs_estimate = 0.65),
+  ) |>
+  filter(domain == "Race")
+  
+dat_pred <- dat_for_pred |>
+  mutate(ci_width_predicted = predict(fit, newdata = dat_for_pred),
+         ci_lower_predicted = abs_estimate - ci_width_predicted/2,
+         ci_upper_predicted = abs_estimate + ci_width_predicted/2) |>
+  arrange(measure, abs_estimate) |>
+  mutate_if(is.numeric, round_half_up, digits = 2) |>
+  mutate(result = paste0(ci_lower_predicted, ", ", ci_upper_predicted))
+
+dat_pred |>
+  dplyr::select(measure, domain, abs_estimate, result) |>
+  kable() |>
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+# ggplot(dat_pred, aes(as.factor(abs_estimate), abs_estimate, color = measure)) +
+#   geom_point(position = position_dodge(width = 0.4)) +
+#   geom_linerange(aes(ymin = ci_lower_predicted, ymax = ci_upper_predicted), position = position_dodge(width = 0.4)) +
+#   coord_flip()
+
+```
+
+# Plots for publication
+
+## Plot 1
+
+Plot 1 shows the point estiamtes and bootstrapped 95% CIs for all participants, split by domain and measure.
+
+```{r fig.height=4.5, fig.width=6}
+
+ggsave(filename  = "plots/figure_1_cis_by_domain_iat_D.pdf",
+       plot      = p_cis_by_domain,
+       device    = "pdf",
+       # path      = NULL,
+       # dpi       = 300,
+       units     = "in",
+       width     = 6,
+       height    = 4.5,
+       limitsize = TRUE)
+
+```
+
+# Session info
+
+```{r}
+
+sessionInfo()
+
+```

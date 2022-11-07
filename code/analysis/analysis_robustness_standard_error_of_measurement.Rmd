@@ -49,9 +49,6 @@ dir.create("plots")
 # set seed for reproducibility
 set.seed(42)
 
-# options
-options(knitr.table.format = "html") # necessary configuration of tables
-
 # disable scientific notation
 options(scipen = 999)
 

@@ -14,7 +14,6 @@ output:
 # TODO
 
 - add demographics? or rely on Bar-Anan and Nosek's descriptions?
-- since moving from lmer on logit transformed to glmer logit model, pairwise comparisons of marginal means (both via emmeans and marginalmeans) do not seem correct. Estimates are too large, and differences are detected where the plot suggests they don't exist.
 
 ```{r, include=FALSE}
 knitr::opts_chunk$set(message=FALSE,
@@ -35,7 +34,7 @@ library(patchwork)
 library(mdthemes)
 library(lme4)
 library(sjPlot)
-library(marginaleffects)
+library(emmeans)
 library(ggstance)
 library(janitor)
 # library(merTools) called via merTools:: to avoid namespace collisions between MASS and dplyr
@@ -74,7 +73,7 @@ TODO
 # data_descriptives %>%
 #   count(domain, measure) %>%
 #   kable() %>%
-#   kable_classic(full_width = FALSE)
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 #
 # data_descriptives %>%
 #   count(domain, measure) %>%
@@ -85,7 +84,7 @@ TODO
 #             sd_n = round(sd(n, na.rm = TRUE), 2)) %>%
 #   gather() %>%
 #   kable() %>%
-#   kable_classic(full_width = FALSE)
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 #
 # data_descriptives %>%
 #   summarize(min_age  = round(min(age, na.rm = TRUE), 2),
@@ -94,12 +93,12 @@ TODO
 #             sd_age   = round(sd(age, na.rm = TRUE), 2)) %>%
 #   gather() %>%
 #   kable() %>%
-#   kable_classic(full_width = FALSE)
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 #
 # data_descriptives %>%
 #   count(gender) %>%
 #   kable() %>%
-#   kable_classic(full_width = FALSE)
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 ```
 
@@ -187,6 +186,8 @@ data_diff_zero <-
   summarize(proportion_diff_zero = mean(sig, na.rm = TRUE),
             variance = plotrix::std.error(sig, na.rm = TRUE)^2,
             .groups = "drop") %>%
+  # logit transform for analysis
+  mutate(proportion_diff_zero_logit = boot::logit(proportion_diff_zero)) %>%
   mutate(variance = ifelse(variance == 0, 0.001, variance))
 
 ```
@@ -197,10 +198,9 @@ data_diff_zero <-
 
 # fit model
 fit_diff_zero <-
-  glmer(proportion_diff_zero ~ 1 + measure + (1 | domain),
-        weights = 1/variance,
-        family = binomial(link = "logit"),
-        data = data_diff_zero)
+  lmer(proportion_diff_zero_logit ~ 1 + measure + (1 | domain),
+       weights = 1/variance,
+       data = data_diff_zero)
 
 # extract re Tau
 results_re_tau_diff_zero <- fit_diff_zero %>%
@@ -208,14 +208,14 @@ results_re_tau_diff_zero <- fit_diff_zero %>%
   as_tibble(rownames = "domain") %>%
   rename(tau = value)
 
-# marginal means
-results_diff_zero <- fit_diff_zero |>
-  marginalmeans(variables = "measure") |>
-  dplyr::select(measure = value, estimate = marginalmean, ci_lower = conf.low, ci_upper = conf.high) %>%
-  mutate(se = ((ci_upper - ci_lower)/2) / 1.96,
-         pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)),
+# extract marginal means
+results_diff_zero <-
+  summary(emmeans(fit_diff_zero, ~ measure)) %>%
+  dplyr::select(measure, estimate = emmean, se = SE, ci_lower = lower.CL, ci_upper = upper.CL) %>%
+  mutate(pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)),
          pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2))) |>
-  select(-se) 
+  select(-se) |>
+  mutate_if(is.numeric, boot::inv.logit)
 
 # # plot
 # p_nonzero_meta <-
@@ -235,26 +235,17 @@ results_diff_zero <- fit_diff_zero |>
 results_diff_zero %>%
   round_df(2) %>%
   kable() %>%
-  kable_classic(full_width = FALSE)
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 # tests
-# using marginalmeans
-fit_diff_zero |>
-  marginalmeans(variables = "measure", hypothesis = "pairwise") %>%
-  mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
-  round_df(2) %>%
-  kable() %>%
-  kable_classic(full_width = FALSE)
+data_emms_diff_zero <- emmeans(fit_diff_zero, list(pairwise ~ measure), adjust = "holm")
 
-# using emmeans
-# data_emms_diff_zero <- emmeans(fit_diff_zero, list(pairwise ~ measure), adjust = "holm")
-# 
-# summary(data_emms_diff_zero)$`pairwise differences of measure` %>%
-#   as.data.frame() %>%
-#   select(comparison = 1, p.value) %>%
-#   mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
-#   kable() %>%
-#   kable_classic(full_width = FALSE)
+summary(data_emms_diff_zero)$`pairwise differences of measure` %>%
+  as.data.frame() %>%
+  select(comparison = 1, p.value) %>%
+  mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 ```
 
@@ -406,15 +397,17 @@ if(file.exists("../../data/results/data_discriminability.csv")) {
     do(bootstrap_discriminability(data = .)) |>
     ungroup() |>
     rename(proportion_discriminable = estimate) |>
+    # logit transform for analysis
     mutate(variance = ((ci_upper - ci_lower)/(1.96*2))^2,
            domain = as.factor(domain),
            measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT")) %>%
     mutate(variance = ifelse(variance == 0, 0.001, variance)) |>
-    # model cannot be run on zero variance or 0 or 1, so offset by a minuscule amount
+    # model cannot be run on zero variance or 0 or 1 logit, so offset by a minuscule amount
     mutate(
       proportion_discriminable_temp = case_when(proportion_discriminable < 0.001 ~ 0.001,
                                                 proportion_discriminable > 0.999 ~ 0.999,
-                                                TRUE ~ proportion_discriminable)
+                                                TRUE ~ proportion_discriminable),
+      proportion_discriminable_logit = boot::logit(proportion_discriminable_temp)
     ) %>%
     select(-proportion_discriminable_temp)
 
@@ -431,10 +424,9 @@ if(file.exists("../../data/results/data_discriminability.csv")) {
 
 # fit meta analytic model
 fit_disciminability <-
-  glmer(proportion_discriminable ~ 1 + measure + (1 | domain),
-        weights = 1/variance,
-        family = binomial(link = "logit"),
-        data = data_discriminability)
+  lmer(proportion_discriminable_logit ~ 1 + measure + (1 | domain),
+       weights = 1/variance,
+       data = data_discriminability)
 
 # extract re Tau
 results_re_tau_disciminability <- fit_disciminability %>%
@@ -443,13 +435,13 @@ results_re_tau_disciminability <- fit_disciminability %>%
   rename(tau = value)
 
 # extract marginal means
-results_disciminability <- fit_disciminability |>
-  marginalmeans(variables = "measure") |>
-  dplyr::select(measure = value, estimate = marginalmean, ci_lower = conf.low, ci_upper = conf.high) %>%
-  mutate(se = ((ci_upper - ci_lower)/2) / 1.96,
-         pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)),
-         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2))) |>
-  select(-se) 
+results_disciminability <-
+  summary(emmeans(fit_disciminability, ~ measure)) %>%
+  dplyr::select(measure, estimate = emmean, se = SE, ci_lower = lower.CL, ci_upper = upper.CL) %>%
+  mutate(pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_disciminability$tau^2)),  # as in metafor package's implementation of credibility intervals, see metafor::predict.rma.R
+         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_disciminability$tau^2))) |>
+  select(-se) |>
+  mutate_if(is.numeric, boot::inv.logit)
 
 # # plot
 # p_discriminability_meta <-
@@ -471,15 +463,17 @@ results_disciminability <- fit_disciminability |>
 results_disciminability %>%
   round_df(2) %>%
   kable() %>%
-  kable_classic(full_width = FALSE)
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 # tests
-fit_disciminability |>
-  marginalmeans(variables = "measure", hypothesis = "pairwise") %>%
+data_emms_disciminability <- emmeans(fit_disciminability, list(pairwise ~ measure), adjust = "holm")
+
+summary(data_emms_disciminability)$`pairwise differences of measure` %>%
+  as.data.frame() %>%
+  select(comparison = 1, p.value) %>%
   mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
-  round_df(2) %>%
   kable() %>%
-  kable_classic(full_width = FALSE)
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 ```
 
@@ -556,7 +550,13 @@ data_ci_width_proportions <- data_processed %>%
   group_by(domain, measure) %>%
   summarize(ci_width_proportion_mean = mean(ci_width_proportion, na.rm = TRUE),
             variance = plotrix::std.error(ci_width_proportion)^2) %>%
-  ungroup() 
+  ungroup() %>%
+  # logit transform
+  mutate(ci_width_proportion_mean_temp = case_when(ci_width_proportion_mean < 0.0001 ~ 0.0001,
+                                                   ci_width_proportion_mean > 0.9999 ~ 0.9999,
+                                                   TRUE ~ ci_width_proportion_mean),
+         ci_width_proportion_mean_logit = boot::logit(ci_width_proportion_mean_temp)) %>%
+  select(-ci_width_proportion_mean_temp)
 
 ```
 
@@ -566,10 +566,9 @@ data_ci_width_proportions <- data_processed %>%
 
 # fit model
 fit_ci_width_proportions <-
-  glmer(ci_width_proportion_mean ~ 1 + measure + (1 | domain),
-        weights = 1/variance,
-        family = binomial(link = "logit"),
-        data = data_ci_width_proportions)
+  lmer(ci_width_proportion_mean_logit ~ 1 + measure + (1 | domain),
+       weights = 1/variance,
+       data = data_ci_width_proportions)
 
 # extract re Tau
 results_re_tau_ci_width_proportions <- fit_ci_width_proportions %>%
@@ -578,13 +577,13 @@ results_re_tau_ci_width_proportions <- fit_ci_width_proportions %>%
   rename(tau = value)
 
 # extract marginal means
-results_ci_width_proportions <- fit_ci_width_proportions |>
-  marginalmeans(variables = "measure") |>
-  dplyr::select(measure = value, estimate = marginalmean, ci_lower = conf.low, ci_upper = conf.high) %>%
-  mutate(se = ((ci_upper - ci_lower)/2) / 1.96,
-         pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)),
-         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2))) |>
-  select(-se) 
+results_ci_width_proportions <-
+  summary(emmeans(fit_ci_width_proportions, ~ measure)) %>%
+  dplyr::select(measure, estimate = emmean, se = SE, ci_lower = lower.CL, ci_upper = upper.CL) %>%
+  mutate(pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_ci_width_proportions$tau^2)),
+         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_ci_width_proportions$tau^2))) %>%
+  select(-se) %>%
+  mutate_if(is.numeric, boot::inv.logit)
 
 # # plot
 # p_coverage_meta <-
@@ -604,15 +603,17 @@ results_ci_width_proportions <- fit_ci_width_proportions |>
 results_ci_width_proportions %>%
   round_df(2) %>%
   kable() %>%
-  kable_classic(full_width = FALSE)
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 # tests
-fit_ci_width_proportions |>
-  marginalmeans(variables = "measure", hypothesis = "pairwise") %>%
+data_emms_ci_width_proportions <- emmeans(fit_ci_width_proportions, list(pairwise ~ measure), adjust = "holm")
+
+summary(data_emms_ci_width_proportions)$`pairwise differences of measure` %>%
+  as.data.frame() %>%
+  select(comparison = 1, p.value) %>%
   mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
-  round_df(2) %>%
   kable() %>%
-  kable_classic(full_width = FALSE)
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 ```
 
@@ -676,7 +677,7 @@ p_cis_by_domain
 
 ggsave(filename  = "plots/figure_1_cis_by_domain.pdf",
        plot      = p_cis_by_domain,
-       device    = cairo_pdf,
+       device    = "pdf",
        # path      = NULL,
        # dpi       = 300,
        units     = "in",
@@ -700,7 +701,7 @@ p_combined
 
 ggsave(filename  = "plots/figure_2_metaanalyses.pdf",
        plot      = p_combined,
-       device    = cairo_pdf,
+       device    = "pdf",
        # path      = NULL,
        # dpi       = 300,
        units     = "in",

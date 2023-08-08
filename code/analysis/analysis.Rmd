@@ -11,11 +11,6 @@ output:
     toc_float: yes
 ---
 
-# TODO
-
-- add demographics? or rely on Bar-Anan and Nosek's descriptions?
-- since moving from lmer on logit transformed to glmer logit model, pairwise comparisons of marginal means (both via emmeans and marginalmeans) do not seem correct. Estimates are too large, and differences are detected where the plot suggests they don't exist.
-
 ```{r, include=FALSE}
 knitr::opts_chunk$set(message=FALSE,
                       warning=FALSE,
@@ -62,47 +57,6 @@ round_df <- function(df, n_digits = 3) {
 
 ```
 
-# Sample descriptives
-
-TODO
-
-```{r}
-
-# data_descriptives <- data_outliers_removed %>%
-#   distinct(session_id, .keep_all = TRUE)
-#
-# data_descriptives %>%
-#   count(domain, measure) %>%
-#   kable() %>%
-#   kable_classic(full_width = FALSE)
-#
-# data_descriptives %>%
-#   count(domain, measure) %>%
-#   summarize(total_n = sum(n),
-#             min_n = min(n),
-#             max_n = max(n),
-#             mean_n = round(mean(n, na.rm = TRUE), 2),
-#             sd_n = round(sd(n, na.rm = TRUE), 2)) %>%
-#   gather() %>%
-#   kable() %>%
-#   kable_classic(full_width = FALSE)
-#
-# data_descriptives %>%
-#   summarize(min_age  = round(min(age, na.rm = TRUE), 2),
-#             max_age  = round(max(age, na.rm = TRUE), 2),
-#             mean_age = round(mean(age, na.rm = TRUE), 2),
-#             sd_age   = round(sd(age, na.rm = TRUE), 2)) %>%
-#   gather() %>%
-#   kable() %>%
-#   kable_classic(full_width = FALSE)
-#
-# data_descriptives %>%
-#   count(gender) %>%
-#   kable() %>%
-#   kable_classic(full_width = FALSE)
-
-```
-
 # Load scored data
 
 ```{r}
@@ -144,6 +98,20 @@ reverse_percent_split <- 100 - percent_split
 ```
 
 The "training" data set which we used to refine the code with was `r percent_split`% of the full data set. Results are reported from the remaining `r reverse_percent_split`% testing data set.
+
+# Percent of cases with CIs beyond the bounds
+
+```{r}
+
+data_processed |>
+  count(ci_lower < 0 | ci_upper > 1) |>
+  mutate(percent = round_half_up(n/sum(n)*100, 2)) |>
+  kable() %>%
+  kable_classic(full_width = FALSE)
+
+```
+
+- Results demonstrate that less than one quarter of a percent of participants are affected by this issue. 
 
 # RQ1. Proportion of indiviudal scores that are detectably different from zero
 
@@ -197,10 +165,9 @@ data_diff_zero <-
 
 # fit model
 fit_diff_zero <-
-  glmer(proportion_diff_zero ~ 1 + measure + (1 | domain),
-        weights = 1/variance,
-        family = binomial(link = "logit"),
-        data = data_diff_zero)
+  lmer(proportion_diff_zero ~ 1 + measure + (1 | domain),
+       weights = 1/variance,
+       data = data_diff_zero)
 
 # extract re Tau
 results_re_tau_diff_zero <- fit_diff_zero %>%
@@ -337,38 +304,38 @@ As such, it is more appropriate and liberal to test for differences between each
 
 # discriminatory using the significance of the difference score
 # the goal here is to assess mean_diff > 1.96 * sqrt(SE1^2 + SE2^2 for every possible comparison EXCLUDING self comparisons. This is tricky to do within a typical tidyverse workflow as it means doing mutates involving each row of a column and every other row of that column but not the same row.
-  # the below solution is to use expand.grid to find all combinations of a row with itself, and then use the modulus of the length of the row to filter out the self-pairings. Then do mutates on the rows to assess significant differences. It's enough to then summarize the proportion of significant results across all participants.
+# the below solution is to use expand.grid to find all combinations of a row with itself, and then use the modulus of the length of the row to filter out the self-pairings. Then do mutates on the rows to assess significant differences. It's enough to then summarize the proportion of significant results across all participants.
 discriminability <- function(data, i) {
   data_with_indexes <- data[i,] # boot function requires data and index
-
+  
   grid_estimates <- expand.grid(data_with_indexes$estimate, data_with_indexes$estimate) |>
     mutate(diff = Var1 - Var2,
            row_number = row_number(),
            modulus = row_number %% (nrow(data_with_indexes)+1)) |>
     filter(modulus != 1) |>
     select(diff)
-
+  
   grid_se <- expand.grid(data_with_indexes$se, data_with_indexes$se) |>
     mutate(critical_value = 1.96 * sqrt(Var1^2 + Var2^2),
            row_number = row_number(),
            modulus = row_number %% (nrow(data_with_indexes)+1)) |>
     filter(modulus != 1) |>
     select(critical_value)
-
+  
   proportion_sig_diff <-
     bind_cols(grid_estimates, grid_se) |>
     mutate(sig = abs(diff) > critical_value) |>
     summarize(proportion_sig_diff = mean(sig, na.rm = TRUE)) |>
     pull(proportion_sig_diff)
-
+  
   return(proportion_sig_diff)
 }
 
 bootstrap_discriminability <- function(data){
-
+  
   require(dplyr)
   require(boot)
-
+  
   fit <-
     boot::boot(data      = data,
                statistic = discriminability,
@@ -377,27 +344,27 @@ bootstrap_discriminability <- function(data){
                stype     = "i",
                parallel  = "multicore",
                ncpus     = parallel::detectCores())
-
+  
   results <- boot::boot.ci(fit, conf = 0.95, type = c("perc"))
-
+  
   output <-
     tibble(
       estimate = fit$t0,
       ci_lower = results$percent[4],
       ci_upper = results$percent[5]
     )
-
+  
   return(output)
 }
 
 # bootstrapping has a long execution time, so load saved values if they've already been calculated
 if(file.exists("../../data/results/data_discriminability.csv")) {
-
+  
   data_discriminability <- read_csv("../../data/results/data_discriminability.csv") |>
     mutate(measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))
-
+  
 } else {
-
+  
   # bootstrap D scores
   data_discriminability <- data_processed |>
     mutate(se = (ci_upper - ci_lower)/(1.96*2)) |>
@@ -417,10 +384,10 @@ if(file.exists("../../data/results/data_discriminability.csv")) {
                                                 TRUE ~ proportion_discriminable)
     ) %>%
     select(-proportion_discriminable_temp)
-
+  
   # save to disk
   write_csv(data_discriminability, "../../data/results/data_discriminability.csv")
-
+  
 }
 
 ```
@@ -431,10 +398,9 @@ if(file.exists("../../data/results/data_discriminability.csv")) {
 
 # fit meta analytic model
 fit_disciminability <-
-  glmer(proportion_discriminable ~ 1 + measure + (1 | domain),
-        weights = 1/variance,
-        family = binomial(link = "logit"),
-        data = data_discriminability)
+  lmer(proportion_discriminable ~ 1 + measure + (1 | domain),
+       weights = 1/variance,
+       data = data_discriminability)
 
 # extract re Tau
 results_re_tau_disciminability <- fit_disciminability %>%
@@ -481,7 +447,7 @@ fit_disciminability |>
   kable() %>%
   kable_classic(full_width = FALSE)
 
-```
+ ```
 
 ## Combined plot
 
@@ -512,8 +478,8 @@ p_discriminability <-
   scale_shape_manual(values = c(15, 16, 16, 16)) +
   scale_size(range = c(1.5, 2.5), guide = "none") +
   scale_x_continuous(breaks = c(0, .25, .5, .75, 1),
-                     labels = c("0.00<br/>(Worse)", "0.25", "0.50", "0.75", "1.00<br/>(Better)"),
-                     limits = c(0,1)) +
+                     labels = c("0.00<br/>(Worse)", "0.25", "0.50", "0.75", "1.00<br/>(Better)")) +
+  coord_cartesian(xlim = c(0, 1)) +
   mdthemes::md_theme_linedraw() +
   labs(x = "Probability that differences can be detected<br/>between two participants' scores<br/>",
        y = "",
@@ -566,10 +532,9 @@ data_ci_width_proportions <- data_processed %>%
 
 # fit model
 fit_ci_width_proportions <-
-  glmer(ci_width_proportion_mean ~ 1 + measure + (1 | domain),
-        weights = 1/variance,
-        family = binomial(link = "logit"),
-        data = data_ci_width_proportions)
+  lmer(ci_width_proportion_mean ~ 1 + measure + (1 | domain),
+       weights = 1/variance,
+       data = data_ci_width_proportions)
 
 # extract re Tau
 results_re_tau_ci_width_proportions <- fit_ci_width_proportions %>%

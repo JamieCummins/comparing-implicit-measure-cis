@@ -113,6 +113,87 @@ data_processed |>
 
 - Results demonstrate that less than one quarter of a percent of participants are affected by this issue. 
 
+# Descriptives: distributions of CI widths
+
+**Descriptive: Non inferential, non preregistered**
+
+Mean and SD can't appropriately describe CI width, as width is a function of the absolute deviation from the zero point (PI = 0.50) in a non linear fashion. This means also makes it more difficult to meta-analyze the CI widths. In lieu of this, we simply provide Maximum A Posteriori (MAP) estimates of the CI widths for each task and domain. NB MAPs are comparable to the mode for continuous data. 
+
+These values are non inferential and were not preregistered.
+
+## MAP CI width
+
+```{r}
+
+data_map_ci_widths <- data_processed %>%
+  group_by(domain, measure) %>%
+  do(point_estimate(.$ci_width, centrality = "MAP")) %>%
+  ungroup()
+
+data_map_ci_widths %>%
+  pivot_wider(names_from = measure, values_from = MAP) %>%
+  round_df(2) %>%
+  t() %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+```
+
+## Plot by domain and measure
+
+```{r}
+
+data_ci_width_map <- data_processed %>%
+  group_by(domain, measure) %>%
+  do(point_estimate(.$ci_width, centrality = "MAP")) %>%
+  ungroup() %>%
+  mutate(domain = fct_rev(domain)) 
+
+# plot
+p_ci_widths <- 
+  ggplot(data_ci_width_map, aes(MAP, fct_rev(measure), color = domain, shape = domain)) + 
+  geom_point(position = position_dodge(width = 0.75)) +
+  scale_shape_manual(values = c(17, 16, 15, 19)) +
+  scale_color_viridis_d(begin = 0.2, end = 0.8, direction = -1) +
+  mdthemes::md_theme_linedraw() +
+  labs(x = "Highest probability (MAP) 95% CI width",
+       y = "",
+       color = "Domain",
+       shape = "Domain") + 
+  theme(legend.position = "top")
+
+p_ci_widths
+
+```
+
+## Plot CI width by |effect|
+
+This is to illustrate the need for MAP CI widths, i.e., because CI width is a function of the absolute effect on the task (deviation from PI = 0.50). 
+
+```{r fig.height=4, fig.width=6}
+
+# plot
+p_ci_widths_by_absolute_score <- 
+  data_processed |>
+  drop_na(measure, domain, estimate, ci_width) |>
+  mutate(absolute_effect = abs(estimate-0.5)) |>
+  ggplot(aes(absolute_effect, ci_width/2)) + 
+  geom_point(aes(color = domain)) +
+  geom_smooth() +
+  facet_wrap(~ measure) +
+  scale_shape_manual(values = c(17, 16, 15, 19)) +
+  scale_color_viridis_d(begin = 0.2, end = 0.8, direction = -1) +
+  mdthemes::md_theme_linedraw() +
+  labs(y = "95% CI width",
+       x = "Absolute effect size on the task (|PI-0.5|)",
+       color = "Domain",
+       shape = "Domain") +
+  theme(legend.position = "top")
+
+p_ci_widths_by_absolute_score
+
+```
+
 # RQ1. Proportion of indiviudal scores that are detectably different from zero
 
 ## Caterpillar plot

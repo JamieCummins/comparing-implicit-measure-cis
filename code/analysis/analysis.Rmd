@@ -259,7 +259,7 @@ results_re_tau_diff_zero <- fit_diff_zero %>%
 # marginal means
 results_diff_zero <- fit_diff_zero |>
   marginalmeans(variables = "measure") |>
-  dplyr::select(measure = value, estimate = marginalmean, ci_lower = conf.low, ci_upper = conf.high) %>%
+  dplyr::select(measure = value, estimate, ci_lower = conf.low, ci_upper = conf.high) %>%
   mutate(se = ((ci_upper - ci_lower)/2) / 1.96,
          pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)),
          pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2))) |>
@@ -492,7 +492,7 @@ results_re_tau_disciminability <- fit_disciminability %>%
 # extract marginal means
 results_disciminability <- fit_disciminability |>
   marginalmeans(variables = "measure") |>
-  dplyr::select(measure = value, estimate = marginalmean, ci_lower = conf.low, ci_upper = conf.high) %>%
+  dplyr::select(measure = value, estimate, ci_lower = conf.low, ci_upper = conf.high) %>%
   mutate(se = ((ci_upper - ci_lower)/2) / 1.96,
          pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)),
          pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2))) |>
@@ -528,7 +528,7 @@ fit_disciminability |>
   kable() %>%
   kable_classic(full_width = FALSE)
 
- ```
+```
 
 ## Combined plot
 
@@ -626,7 +626,7 @@ results_re_tau_ci_width_proportions <- fit_ci_width_proportions %>%
 # extract marginal means
 results_ci_width_proportions <- fit_ci_width_proportions |>
   marginalmeans(variables = "measure") |>
-  dplyr::select(measure = value, estimate = marginalmean, ci_lower = conf.low, ci_upper = conf.high) %>%
+  dplyr::select(measure = value, estimate, ci_lower = conf.low, ci_upper = conf.high) %>%
   mutate(se = ((ci_upper - ci_lower)/2) / 1.96,
          pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)),
          pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2))) |>

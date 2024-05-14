@@ -234,7 +234,8 @@ data_diff_zero <-
   mutate(domain = as.factor(domain)) %>%
   group_by(domain, measure) %>%
   summarize(proportion_diff_zero = mean(sig, na.rm = TRUE),
-            variance = plotrix::std.error(sig, na.rm = TRUE)^2,
+            variance = var(sig, na.rm = TRUE),
+            standard_error = plotrix::std.error(sig, na.rm = TRUE),
             .groups = "drop") %>%
   mutate(variance = ifelse(variance == 0, 0.001, variance))
 
@@ -314,8 +315,8 @@ data_diff_zero_combined <-
   bind_rows(results_diff_zero %>%
               mutate(domain = "Meta-analysis"),
             data_diff_zero %>%
-              mutate(ci_lower = proportion_diff_zero - sqrt(variance)*1.96,
-                     ci_upper = proportion_diff_zero + sqrt(variance)*1.96) %>%
+              mutate(ci_lower = proportion_diff_zero - standard_error*1.96,
+                     ci_upper = proportion_diff_zero + standard_error*1.96) %>%
               select(measure, domain, estimate = proportion_diff_zero, ci_lower, ci_upper)) %>%
   mutate(domain = fct_relevel(domain, "Meta-analysis", "Self", "Race", "Politics"),
          point_size = case_when(domain == "Meta-analysis" ~ 2.5,

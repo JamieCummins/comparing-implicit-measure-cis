@@ -29,6 +29,22 @@ raw_trial_level_df |>
 
 ```{r}
 
+D_score <- function(data, i) {
+    data_with_indexes <- data[i,] # boot function requires data and index
+    b  <- na.omit(data_with_indexes$score[data_with_indexes$trial_consistency == "inconsistent"])
+    a  <- na.omit(data_with_indexes$score[data_with_indexes$trial_consistency == "consistent"])
+    mean_b <- mean(b)
+    mean_a <- mean(a)
+    sd <- sd(c(a, b))
+    D <- (mean_b-mean_a)/sd
+    return(D)
+  }
+
+
+```
+
+```{r}
+
 filtered_data <- raw_trial_level_df |>
   arrange(session_id, block_number, trial_number) |>
   group_by(session_id) |>
@@ -43,11 +59,116 @@ filtered_data <- raw_trial_level_df |>
   
   mutate(iat_session = ifelse(str_ends(task_name, "_1"), 1, 2)) |>
   
-  # arrange the data so that blocks are ordered uniformly 
-  arrange(session_id, iat_session, block_pairing_definition, trial_number)
+  # arrange the data so that blocks are ordered uniformly across participants
+  # i.e., the first block is always either con or incon block (which will vary by domain)
+  arrange(session_id, iat_session, block_pairing_definition, trial_number) |>
+  mutate(domain = str_sub(task_name, end = -3)) |>
+  rename(block = block_pairing_definition)
+
+colnames(filtered_data)
+
+```
+
+# Compute D scores
+
+```{r}
+
+d_scores_data <- filtered_data |>
+  group_by(session_id, iat_session) |>
+  mutate(sd = sd(trial_latency)) |>
+  group_by(session_id, domain, iat_session, block) |>
+  summarise(mean_latency = mean(trial_latency),
+            sd = mean(sd)) |>
+  ungroup() |>
+  group_by(session_id) |>
+  mutate(block_number = rep(c("block_1", "block_2"), 2)) |>
+  select(-block) |>
+  ungroup() |>
+  pivot_wider(names_from = block_number,
+              values_from = mean_latency) |>
+  mutate(d_score = (block_1 - block_2) / sd) 
+
+t1_sd <- d_scores_data |>
+  group_by(domain) |>
+  summarise(sd = sd(d_score))
+
+iat_sem_data <- d_scores_data |>
+  select(session_id, domain, iat_session, d_score) |>
+  pivot_wider(names_from = iat_session,
+              values_from = d_score) |>
+  left_join(t1_sd) |>
+  group_by(domain) |>
+  mutate(trr = cor(`1`, `2`),
+         t1_sem = sd * (sqrt(1 - trr)),
+         t1_ci_upper_sem = `1` + (1.96 * t1_sem),
+         t1_ci_lower_sem = `1` - (1.96 * t1_sem)) |>
+  rename(t1_d_score_sem = `1`,
+         t2_d_score_sem = `2`) |>
+  select(session_id, domain, trr, t1_sem, t1_d_score_sem, 
+         t2_d_score_sem, t1_ci_lower_sem, t1_ci_upper_sem)
+  
+
+```
+
+# scores with bootstrapping approach
+
+```{r}
+
+n_boots <- 2000
+
+calculate_d_score <- function(data, i) {
+    data_with_indexes <- data[i,] # boot function requires data and index
+    b  <- na.omit(data_with_indexes$trial_latency[data_with_indexes$block_number == "block_1"])
+    a  <- na.omit(data_with_indexes$trial_latency[data_with_indexes$block_number == "block_2"])
+    mean_b <- mean(b)
+    mean_a <- mean(a)
+    sd <- sd(c(a, b))
+    D <- (mean_b-mean_a)/sd
+    return(D)
+  }
+
+bootstrap_D_score <- function(data){
+    
+    require(dplyr)
+    require(boot)
+    
+    fit <- 
+      boot::boot(data      = data, 
+                 statistic = calculate_d_score, 
+                 R         = n_boots, 
+                 sim       = "ordinary", 
+                 stype     = "i",
+                 parallel  = "multicore", 
+                 ncpus     = parallel::detectCores()-1)
+    
+    results <- boot::boot.ci(fit, conf = 0.95, type = c("basic"))
+    
+    output <- 
+      tibble(method   = "basic",
+             bootstrap_d_score = fit$t0,
+             bootstrap_ci_lower = results$basic[4],
+             bootstrap_ci_upper = results$basic[5])
+    
+    return(output)
+}
 
 
+bootstrapped_d_scores_data <- filtered_data |>
+  arrange(session_id, iat_session, domain, block, trial_number) |>
+  group_by(session_id) |>
+  mutate(block_number = rep(rep(c("block_1", "block_2"), each = 60), 2)) |>
+  ungroup() |>
+  #head(480) |>
+  group_by(session_id, domain, iat_session) |>
+  do(bootstrap_D_score(data = .)) |>
+  ungroup() |>
+  select(-method) |>
+  pivot_wider(names_from = iat_session,
+              values_from = c(bootstrap_d_score, bootstrap_ci_lower, bootstrap_ci_upper))
 
+
+iat_sem_data |>
+  left_join(bootstrapped_d_scores_data)
 
 ```
 

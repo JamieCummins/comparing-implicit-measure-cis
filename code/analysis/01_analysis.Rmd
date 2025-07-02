@@ -1,0 +1,769 @@
+---
+title: "Comparing 6 implicit measures' suitability for individual use"
+author: "Ian Hussey & Jamie Cummins"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    highlight: haddock
+    theme: flatly
+    toc: yes
+    toc_float: yes
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(message=FALSE,
+                      warning=FALSE,
+                      cache.lazy=FALSE)
+```
+
+```{r}
+
+# dependencies
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(boot)
+library(parallel)
+library(bayestestR)
+library(patchwork)
+library(mdthemes)
+library(lme4)
+library(sjPlot)
+library(marginaleffects)
+library(ggstance)
+library(janitor)
+# library(merTools) called via merTools:: to avoid namespace collisions between MASS and dplyr
+
+# create necessary directories
+dir.create("../../data/results")
+dir.create("plots")
+
+# set seed for reproducibility
+set.seed(42)
+
+# options
+options(knitr.table.format = "html") # necessary configuration of tables
+
+# disable scientific notation
+options(scipen = 999)
+
+
+# function to round all numeric vars in a data frame
+round_df <- function(df, n_digits = 3) {
+  require(janitor)
+  df %>% mutate_if(is.numeric, janitor::round_half_up, digits = n_digits)
+}
+
+```
+
+# Load scored data
+
+```{r}
+
+# #run the following only the first time to split the data in a reproducible way
+# # split data for training and testing
+# data_processed_all <- read_rds("../../data/processed/data_processed.rds") |>
+#   mutate(domain = as.factor(str_to_sentence(domain)),
+#          measure = case_when(measure == "iat"  ~ "IAT",
+#                              measure == "biat" ~ "Brief IAT",
+#                              measure == "siat" ~ "SC-IAT",
+#                              measure == "amp"  ~ "AMP",
+#                              measure == "gnat" ~ "GNAT",
+#                              measure == "ept"  ~ "EPT"),
+#          measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))
+# 
+# # for development, use a 10% training subset
+# data_processed_training <- data_processed_all |>
+#   group_by(domain, measure) |>
+#   sample_frac(0.1)
+# 
+# data_processed_testing <-
+#   anti_join(data_processed_all, data_processed_training, by = c("session_id", "domain", "measure"))
+# 
+# write_rds(data_processed_training, "../../data/processed/data_processed_training.rds")
+# write_rds(data_processed_testing, "../../data/processed/data_processed_testing.rds")
+
+
+# training/dev
+#data_processed <- read_rds("../../data/processed/data_processed_training.rds")
+# percent_split <- "???"
+# reverse_percent_split <- "???"
+
+# # for realz: use the remaining 90% as the testing set to make conclusions
+data_processed <- read_rds("../../data/processed/data_processed_testing.rds") |>
+  mutate(measure = 
+           ifelse(as.character(measure) == "SC-IAT", "ST-IAT", as.character(measure)),
+         measure = as.factor(measure))
+percent_split <- 100 - round_half_up(nrow(data_processed)/39958*100, 0)
+reverse_percent_split <- 100 - percent_split
+
+```
+
+The "training" data set which we used to refine the code with was `r percent_split`% of the full data set. Results are reported from the remaining `r reverse_percent_split`% testing data set.
+
+# Percent of cases with CIs beyond the bounds
+
+```{r}
+
+data_processed |>
+  count(ci_lower < 0 | ci_upper > 1) |>
+  mutate(percent = round_half_up(n/sum(n)*100, 2)) |>
+  kable() %>%
+  kable_classic(full_width = FALSE)
+
+```
+
+- Results demonstrate that less than one quarter of a percent of participants are affected by this issue. 
+
+# Descriptives: distributions of CI widths
+
+**Descriptive: Non inferential, non preregistered**
+
+Mean and SD can't appropriately describe CI width, as width is a function of the absolute deviation from the zero point (PI = 0.50) in a non linear fashion. This means also makes it more difficult to meta-analyze the CI widths. In lieu of this, we simply provide Maximum A Posteriori (MAP) estimates of the CI widths for each task and domain. NB MAPs are comparable to the mode for continuous data. 
+
+These values are non inferential and were not preregistered.
+
+## MAP CI width
+
+```{r}
+
+data_map_ci_widths <- data_processed %>%
+  group_by(domain, measure) %>%
+  do(point_estimate(.$ci_width, centrality = "MAP")) %>%
+  ungroup()
+
+data_map_ci_widths %>%
+  pivot_wider(names_from = measure, values_from = MAP) %>%
+  round_df(2) %>%
+  t() %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+```
+
+## Plot by domain and measure
+
+```{r}
+
+data_ci_width_map <- data_processed %>%
+  group_by(domain, measure) %>%
+  do(point_estimate(.$ci_width, centrality = "MAP")) %>%
+  ungroup() %>%
+  mutate(domain = fct_rev(domain)) 
+
+# plot
+p_ci_widths <- 
+  ggplot(data_ci_width_map, aes(MAP, fct_rev(measure), color = domain, shape = domain)) + 
+  geom_point(position = position_dodge(width = 0.75)) +
+  scale_shape_manual(values = c(17, 16, 15, 19)) +
+  scale_color_viridis_d(begin = 0.2, end = 0.8, direction = -1) +
+  mdthemes::md_theme_linedraw() +
+  labs(x = "Highest probability (MAP) 95% CI width",
+       y = "",
+       color = "Domain",
+       shape = "Domain") + 
+  theme(legend.position = "top")
+
+p_ci_widths
+
+```
+
+## Plot CI width by |effect|
+
+This is to illustrate the need for MAP CI widths, i.e., because CI width is a function of the absolute effect on the task (deviation from PI = 0.50). 
+
+```{r fig.height=4, fig.width=6}
+
+# plot
+p_ci_widths_by_absolute_score <- 
+  data_processed |>
+  drop_na(measure, domain, estimate, ci_width) |>
+  mutate(absolute_effect = abs(estimate-0.5)) |>
+  ggplot(aes(absolute_effect, ci_width/2)) + 
+  geom_point(aes(color = domain)) +
+  geom_smooth() +
+  facet_wrap(~ measure) +
+  scale_shape_manual(values = c(17, 16, 15, 19)) +
+  scale_color_viridis_d(begin = 0.2, end = 0.8, direction = -1) +
+  mdthemes::md_theme_linedraw() +
+  labs(y = "95% CI width",
+       x = "Absolute effect size on the task (|PI-0.5|)",
+       color = "Domain",
+       shape = "Domain") +
+  theme(legend.position = "top")
+
+p_ci_widths_by_absolute_score
+
+```
+
+# RQ1. Proportion of indiviudal scores that are detectably different from zero
+
+## Caterpillar plot
+
+```{r fig.height=7, fig.width=6}
+
+p_cis_by_domain <-
+  data_processed %>%
+  arrange(estimate) %>%
+  group_by(domain, measure) %>%
+  mutate(ordered_id = row_number()/n()) %>%
+  ungroup() %>%
+  ggplot() +
+  geom_linerange(aes(x = ordered_id, ymin = ci_lower, ymax = ci_upper, color = sig),
+                 alpha = 1) +
+  geom_point(aes(ordered_id, estimate), size = 0.5, shape = "square") +
+  geom_hline(yintercept = 0.50, linetype = "dotted") +
+  mdthemes::md_theme_linedraw() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "top") +
+  scale_color_viridis_d(end = 0.6, direction = -1) +
+  xlab("Ranked participant") +
+  ylab("PI score") +
+  labs(color = "95% CI excludes zero point") +
+  facet_grid(measure ~ domain)
+
+p_cis_by_domain
+
+```
+
+## Calculate scores
+
+```{r}
+
+data_diff_zero <-
+  data_processed %>%
+  mutate(domain = as.factor(domain)) %>%
+  group_by(domain, measure) %>%
+  summarize(proportion_diff_zero = mean(sig, na.rm = TRUE),
+            variance = var(sig, na.rm = TRUE),
+            standard_error = plotrix::std.error(sig, na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(variance = ifelse(variance == 0, 0.001, variance))
+
+```
+
+## Meta
+
+```{r}
+
+# fit model
+fit_diff_zero <-
+  lmer(proportion_diff_zero ~ 1 + measure + (1 | domain),
+       weights = 1/variance,
+       data = data_diff_zero)
+
+# extract re Tau
+results_re_tau_diff_zero <- fit_diff_zero %>%
+  merTools::REsdExtract() %>%
+  as_tibble(rownames = "domain") %>%
+  rename(tau = value)
+
+# marginal means
+results_diff_zero <- fit_diff_zero |>
+  marginalmeans(variables = "measure") |>
+  dplyr::select(measure = value, estimate, ci_lower = conf.low, ci_upper = conf.high) %>%
+  mutate(se = ((ci_upper - ci_lower)/2) / 1.96,
+         pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)),
+         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2))) |>
+  select(-se) 
+
+# # plot
+# p_nonzero_meta <-
+#   ggplot(results_diff_zero, aes(fct_rev(measure), estimate)) +
+#   #geom_linerange(aes(ymin = pi_lower, ymax = pi_upper), size = 0.5, linetype = "solid") +
+#   geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
+#   geom_point(size = 2.5) +
+#   mdthemes::md_theme_linedraw() +
+#   scale_y_continuous(breaks = c(0, .25, .5, .75, 1), labels = c("0.00<br/>(Worse)", "0.25", "0.50", "0.75", "1.00<br/>(Better)")) +
+#   labs(x = "",
+#        y = "Proportion of participants<br/>with non-zero effects<br/>") +
+#   theme(legend.position = "none") +
+#   coord_flip(ylim = c(0, 1))
+# 
+# p_nonzero_meta
+
+results_diff_zero %>%
+  round_df(2) %>%
+  kable() %>%
+  kable_classic(full_width = FALSE)
+
+# tests
+# using marginalmeans
+fit_diff_zero |>
+  marginalmeans(variables = "measure", hypothesis = "pairwise") %>%
+  mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
+  round_df(2) %>%
+  kable() %>%
+  kable_classic(full_width = FALSE)
+
+# using emmeans
+# data_emms_diff_zero <- emmeans(fit_diff_zero, list(pairwise ~ measure), adjust = "holm")
+# 
+# summary(data_emms_diff_zero)$`pairwise differences of measure` %>%
+#   as.data.frame() %>%
+#   select(comparison = 1, p.value) %>%
+#   mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
+#   kable() %>%
+#   kable_classic(full_width = FALSE)
+
+```
+
+## Combined plot
+
+```{r}
+
+data_diff_zero_combined <-
+  bind_rows(results_diff_zero %>%
+              mutate(domain = "Meta-analysis"),
+            data_diff_zero %>%
+              mutate(ci_lower = proportion_diff_zero - standard_error*1.96,
+                     ci_upper = proportion_diff_zero + standard_error*1.96) %>%
+              select(measure, domain, estimate = proportion_diff_zero, ci_lower, ci_upper)) %>%
+  mutate(domain = fct_relevel(domain, "Meta-analysis", "Self", "Race", "Politics"),
+         point_size = case_when(domain == "Meta-analysis" ~ 2.5,
+                                TRUE ~ 1.5))
+
+p_nonzero <-
+  data_diff_zero_combined %>%
+  ggplot(aes(estimate, fct_rev(measure), color = domain, shape = domain)) +
+  # geom_linerangeh(aes(xmin = pi_lower, 
+  #                     xmax = pi_upper), 
+  #                 size = 0.5, 
+  #                 linetype = "dotted",
+  #                 position = position_dodge(width = 0.6)) +
+  geom_linerangeh(aes(xmin = ci_lower,
+                      xmax = ci_upper),
+                  position = position_dodge(width = 0.6)) +
+  geom_point(aes(size = point_size), position = position_dodge(width = 0.6)) +
+  scale_color_manual(values = c("#000000", viridisLite::viridis(begin = 0.4, end = 0.8, n = 3))) +
+  scale_shape_manual(values = c(15, 16, 16, 16)) +
+  scale_size(range = c(1.5, 2.5), guide = "none") +
+  scale_x_continuous(breaks = c(0, .25, .5, .75, 1),
+                     labels = c("0.00<br/>(Worse)", "0.25", "0.50", "0.75", "1.00<br/>(Better)"),
+                     limits = c(0,1)) +
+  #coord_flip(ylim = c(0, 1)) +
+  mdthemes::md_theme_linedraw() +
+  labs(x = "Proportion of participants<br/>with non-zero effects",
+       y = "",
+       color = "Domain",
+       shape = "Domain") +
+  theme(legend.position = "top",
+        legend.title = element_blank()) +
+  guides(color = guide_legend(reverse = TRUE),
+         shape = guide_legend(reverse = TRUE))
+
+p_nonzero
+
+```
+
+# RQ2. Probability that differences can be detected between two participants' scores
+
+## Calculate scores
+
+Many have argued that the zero point is arbitrary and not a useful reference point. Instead of asking "what proportion of PI scores are different from the neutral point (0.50)?", we could also ask "what proportion of PI scores are different from one another?"
+
+A common way to assess whether for differences between two estimates is to assess for non overlap between their confidence intervals. However, it has been repeatedly pointed out that this is less than ideal: there are situations where confidence intervals overlap slightly and yet the difference in means is significant.
+
+Cornell Statistical Consulting Unit (2008) [Overlapping Confidence Intervals and Statistical
+Significance](https://cscu.cornell.edu/wp-content/uploads/73_ci.pdf) argue this clearly. From their whitepaper:
+
+The null hypothesis of zero mean difference is rejected when
+
+$|x_1 - x_2| > t \times \sqrt{SE_1^2 + SE_2^2}$
+
+The individual confidence intervals do not overlap when
+
+$|x_1 - x_2| > t \times (SE_1 + SE_2)$
+
+It can be shown that the following is always true:
+
+$\sqrt{SE_1^2 + SE_2^2} \le (SE_1 + SE_2)$
+
+This means that as $|x_1 - x_2|$ increases there will be a point at which there is a significant difference between the means, but where the confidence intervals still overlaps. I.e., non overlapping confidence intervals indicate differences, but partially overlapping intervals do not exclude that there being differences.
+
+As such, it is more appropriate and liberal to test for differences between each score and every other score (within the same domain and trial type) based on the CI of the difference scores rather than the non-overlap of intervals of the pair of scores.
+
+```{r}
+
+# discriminatory using the significance of the difference score
+# the goal here is to assess mean_diff > 1.96 * sqrt(SE1^2 + SE2^2 for every possible comparison EXCLUDING self comparisons. This is tricky to do within a typical tidyverse workflow as it means doing mutates involving each row of a column and every other row of that column but not the same row.
+# the below solution is to use expand.grid to find all combinations of a row with itself, and then use the modulus of the length of the row to filter out the self-pairings. Then do mutates on the rows to assess significant differences. It's enough to then summarize the proportion of significant results across all participants.
+discriminability <- function(data, i) {
+  data_with_indexes <- data[i,] # boot function requires data and index
+  
+  grid_estimates <- expand.grid(data_with_indexes$estimate, data_with_indexes$estimate) |>
+    mutate(diff = Var1 - Var2,
+           row_number = row_number(),
+           modulus = row_number %% (nrow(data_with_indexes)+1)) |>
+    filter(modulus != 1) |>
+    select(diff)
+  
+  grid_se <- expand.grid(data_with_indexes$se, data_with_indexes$se) |>
+    mutate(critical_value = 1.96 * sqrt(Var1^2 + Var2^2),
+           row_number = row_number(),
+           modulus = row_number %% (nrow(data_with_indexes)+1)) |>
+    filter(modulus != 1) |>
+    select(critical_value)
+  
+  proportion_sig_diff <-
+    bind_cols(grid_estimates, grid_se) |>
+    mutate(sig = abs(diff) > critical_value) |>
+    summarize(proportion_sig_diff = mean(sig, na.rm = TRUE)) |>
+    pull(proportion_sig_diff)
+  
+  return(proportion_sig_diff)
+}
+
+bootstrap_discriminability <- function(data){
+  
+  require(dplyr)
+  require(boot)
+  
+  fit <-
+    boot::boot(data      = data,
+               statistic = discriminability,
+               R         = 2000,
+               sim       = "ordinary",
+               stype     = "i",
+               parallel  = "multicore",
+               ncpus     = parallel::detectCores())
+  
+  results <- boot::boot.ci(fit, conf = 0.95, type = c("perc"))
+  
+  output <-
+    tibble(
+      estimate = fit$t0,
+      ci_lower = results$percent[4],
+      ci_upper = results$percent[5]
+    )
+  
+  return(output)
+}
+
+# bootstrapping has a long execution time, so load saved values if they've already been calculated
+if(file.exists("../../data/results/data_discriminability.csv")) {
+  
+  data_discriminability <- read_csv("../../data/results/data_discriminability.csv") |>
+    mutate(measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))
+  
+} else {
+  
+  # bootstrap D scores
+  data_discriminability <- data_processed |>
+    mutate(se = (ci_upper - ci_lower)/(1.96*2)) |>
+    select(session_id, domain, measure, estimate, se) |>
+    group_by(domain, measure) |>
+    do(bootstrap_discriminability(data = .)) |>
+    ungroup() |>
+    rename(proportion_discriminable = estimate) |>
+    mutate(variance = ((ci_upper - ci_lower)/(1.96*2))^2,
+           domain = as.factor(domain),
+           measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT")) %>%
+    mutate(variance = ifelse(variance == 0, 0.001, variance)) |>
+    # model cannot be run on zero variance or 0 or 1, so offset by a minuscule amount
+    mutate(
+      proportion_discriminable_temp = case_when(proportion_discriminable < 0.001 ~ 0.001,
+                                                proportion_discriminable > 0.999 ~ 0.999,
+                                                TRUE ~ proportion_discriminable)
+    ) %>%
+    select(-proportion_discriminable_temp)
+  
+  # save to disk
+  write_csv(data_discriminability, "../../data/results/data_discriminability.csv")
+  
+}
+
+```
+
+## Meta
+
+```{r}
+
+# fit meta analytic model
+fit_disciminability <-
+  lmer(proportion_discriminable ~ 1 + measure + (1 | domain),
+       weights = 1/variance,
+       data = data_discriminability)
+
+# extract re Tau
+results_re_tau_disciminability <- fit_disciminability %>%
+  merTools::REsdExtract() %>%
+  as_tibble(rownames = "measure") %>%
+  rename(tau = value)
+
+# extract marginal means
+results_disciminability <- fit_disciminability |>
+  marginalmeans(variables = "measure") |>
+  dplyr::select(measure = value, estimate, ci_lower = conf.low, ci_upper = conf.high) %>%
+  mutate(se = ((ci_upper - ci_lower)/2) / 1.96,
+         pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)),
+         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2))) |>
+  select(-se) 
+
+# # plot
+# p_discriminability_meta <-
+#   ggplot(results_disciminability, aes(fct_rev(measure), estimate)) +
+#   #geom_linerange(aes(ymin = pi_lower, ymax = pi_upper), size = 0.5, linetype = "solid") +
+#   geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
+#   geom_point(size = 2.5) +
+#   scale_y_continuous(breaks = c(0, .25, .5, .75, 1), labels = c("0.00<br/>(Worse)", "0.25", "0.50", "0.75", "1.00<br/>(Better)")) +
+#   scale_shape_manual(values = c(15, 16)) +
+#   scale_color_viridis_d(begin = 0.3, end = 0.7) +
+#   mdthemes::md_theme_linedraw() +
+#   labs(x = "",
+#        y = "Probability that differences can be detected<br/>between two participants' scores<br/>") +
+#   theme(legend.position = "none") +
+#   coord_flip(ylim = c(0, 1))
+# 
+# p_discriminability_meta
+
+results_disciminability %>%
+  round_df(2) %>%
+  kable() %>%
+  kable_classic(full_width = FALSE)
+
+# tests
+fit_disciminability |>
+  marginalmeans(variables = "measure", hypothesis = "pairwise") %>%
+  mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
+  round_df(2) %>%
+  kable() %>%
+  kable_classic(full_width = FALSE)
+
+```
+
+## Combined plot
+
+```{r}
+
+data_disciminability_combined <-
+  bind_rows(results_disciminability %>%
+              mutate(domain = "Meta-analysis"),
+            data_discriminability %>%
+              select(measure, domain, estimate = proportion_discriminable, ci_lower, ci_upper)) %>%
+  mutate(domain = fct_relevel(domain, "Meta-analysis", "Self", "Race", "Politics"),
+         point_size = case_when(domain == "Meta-analysis" ~ 2.5,
+                                TRUE ~ 1.5))
+
+p_discriminability <-
+  data_disciminability_combined %>%
+  ggplot(aes(estimate, fct_rev(measure), color = domain, shape = domain)) +
+  # geom_linerangeh(aes(xmin = pi_lower,
+  #                     xmax = pi_upper),
+  #                 size = 0.5,
+  #                 linetype = "dotted",
+  #                 position = position_dodge(width = 0.6)) +
+  geom_linerangeh(aes(xmin = ci_lower,
+                      xmax = ci_upper),
+                  position = position_dodge(width = 0.6)) +
+  geom_point(aes(size = point_size), position = position_dodge(width = 0.6)) +
+  scale_color_manual(values = c("#000000", viridisLite::viridis(begin = 0.4, end = 0.8, n = 3))) +
+  scale_shape_manual(values = c(15, 16, 16, 16)) +
+  scale_size(range = c(1.5, 2.5), guide = "none") +
+  scale_x_continuous(breaks = c(0, .25, .5, .75, 1),
+                     labels = c("0.00<br/>(Worse)", "0.25", "0.50", "0.75", "1.00<br/>(Better)")) +
+  coord_cartesian(xlim = c(0, 1)) +
+  mdthemes::md_theme_linedraw() +
+  labs(x = "Probability that differences can be detected<br/>between two participants' scores<br/>",
+       y = "",
+       color = "Domain",
+       shape = "Domain") +
+  # theme(legend.position = "top",
+  #       legend.title = element_blank()) +
+  theme(legend.position="none") +
+  guides(color = guide_legend(reverse = TRUE),
+         shape = guide_legend(reverse = TRUE))
+
+p_discriminability
+
+```
+
+# RQ3. Proportion of observed range of 95% CI widths covered by individual participants' 95% CIs
+
+NB observed range of confidence intervals
+
+## Calculate scores
+
+```{r}
+
+## calculate observed ranges
+observed_range_estimates <- data_processed %>%
+  group_by(measure, domain) %>%
+  dplyr::summarize(min = min(ci_lower, na.rm = TRUE),
+                   max = max(ci_upper, na.rm = TRUE),
+                   .groups = "drop") %>%
+  mutate(range = max - min)
+
+# calculate CI / range
+data_ci_width_proportions <- data_processed %>%
+  # join this data into the original data
+  full_join(observed_range_estimates, by = c("measure", "domain")) %>%
+  # calculate ci width as a proportion of observed range
+  mutate(ci_width_proportion = ci_width / range,
+         domain = as.factor(domain),
+         measure = fct_relevel(measure, "IAT", "Brief IAT", "ST-IAT", "AMP", "GNAT", "EPT")) %>%
+  group_by(domain, measure) %>%
+  summarize(ci_width_proportion_mean = mean(ci_width_proportion, na.rm = TRUE),
+            variance = plotrix::std.error(ci_width_proportion)^2) %>%
+  ungroup() 
+
+```
+
+## Meta
+
+```{r}
+
+# fit model
+fit_ci_width_proportions <-
+  lmer(ci_width_proportion_mean ~ 1 + measure + (1 | domain),
+       weights = 1/variance,
+       data = data_ci_width_proportions)
+
+# extract re Tau
+results_re_tau_ci_width_proportions <- fit_ci_width_proportions %>%
+  merTools::REsdExtract() %>%
+  as_tibble(rownames = "measure") %>%
+  rename(tau = value)
+
+# extract marginal means
+results_ci_width_proportions <- fit_ci_width_proportions |>
+  marginalmeans(variables = "measure") |>
+  dplyr::select(measure = value, estimate, ci_lower = conf.low, ci_upper = conf.high) %>%
+  mutate(se = ((ci_upper - ci_lower)/2) / 1.96,
+         pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)),
+         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2))) |>
+  select(-se) 
+
+# # plot
+# p_coverage_meta <-
+#   ggplot(results_ci_width_proportions, aes(fct_rev(measure), estimate)) +
+#   #geom_linerange(aes(ymin = pi_lower, ymax = pi_upper), size = 0.5, linetype = "solid") +
+#   geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
+#   geom_point(size = 2.5) +
+#   mdthemes::md_theme_linedraw() +
+#   scale_y_continuous(breaks = c(0, .25, .5, .75, 1), labels = c("0.00<br/>(Better)", "0.25", "0.50", "0.75", "1.00<br/>(Worse)")) +
+#   labs(x = "",
+#        y = "Proportion of observed range covered <br/>by individual participants' 95% CIs") +
+#   theme(legend.position = "none") +
+#   coord_flip(ylim = c(0, 1))
+# 
+# p_coverage_meta
+
+results_ci_width_proportions %>%
+  round_df(2) %>%
+  kable() %>%
+  kable_classic(full_width = FALSE)
+
+# tests
+fit_ci_width_proportions |>
+  marginalmeans(variables = "measure", hypothesis = "pairwise") %>%
+  mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
+  round_df(2) %>%
+  kable() %>%
+  kable_classic(full_width = FALSE)
+
+```
+
+## Combined plot
+
+```{r}
+
+data_coverage_combined <-
+  bind_rows(results_ci_width_proportions %>%
+              mutate(domain = "Meta-analysis"),
+            data_ci_width_proportions %>%
+              mutate(ci_lower = ci_width_proportion_mean - sqrt(variance)*1.96,
+                     ci_upper = ci_width_proportion_mean + sqrt(variance)*1.96) %>%
+              select(measure, domain, estimate = ci_width_proportion_mean, ci_lower, ci_upper)) %>%
+  mutate(domain = fct_relevel(domain, "Meta-analysis", "Self", "Race", "Politics"),
+         point_size = case_when(domain == "Meta-analysis" ~ 2.5,
+                                TRUE ~ 1.5))
+
+p_coverage <-
+  data_coverage_combined %>%
+  ggplot(aes(estimate, fct_rev(measure), color = domain, shape = domain)) +
+  # geom_linerangeh(aes(xmin = pi_lower,
+  #                     xmax = pi_upper),
+  #                 size = 0.5,
+  #                 linetype = "dotted",
+  #                 position = position_dodge(width = 0.6)) +
+  geom_linerangeh(aes(xmin = ci_lower,
+                      xmax = ci_upper),
+                  position = position_dodge(width = 0.6)) +
+  geom_point(aes(size = point_size), position = position_dodge(width = 0.6)) +
+  scale_color_manual(values = c("#000000", viridisLite::viridis(begin = 0.4, end = 0.8, n = 3))) +
+  scale_shape_manual(values = c(15, 16, 16, 16)) +
+  scale_size(range = c(1.5, 2.5), guide = "none") +
+  scale_x_continuous(breaks = c(0, .25, .5, .75, 1),
+                     labels = c("0.00<br/>(Better)", "0.25", "0.50", "0.75", "1.00<br/>(Worse)"),
+                     limits = c(0,1)) +
+  mdthemes::md_theme_linedraw() +
+  labs(x = "Proportion of observed range covered <br/>by individual participants' 95% CIs",
+       y = "",
+       color = "Domain",
+       shape = "Domain") +
+  # theme(legend.position = "top",
+  #       legend.title = element_blank()) +
+  theme(legend.position="none") +
+  guides(color = guide_legend(reverse = TRUE),
+         shape = guide_legend(reverse = TRUE))
+
+p_coverage
+
+```
+
+# Plots for publication
+
+## Plot 1
+
+Plot 1 shows the point estiamtes and bootstrapped 95% CIs for all participants, split by domain and measure.
+
+```{r fig.height=7, fig.width=6}
+
+p_cis_by_domain
+
+ggsave(filename  = "plots/figure_1_cis_by_domain.pdf",
+       plot      = p_cis_by_domain,
+       device    = pdf,
+       # path      = NULL,
+       # dpi       = 300,
+       units     = "in",
+       width     = 6,
+       height    = 7,
+       limitsize = TRUE)
+
+```
+
+## Plot 2
+
+```{r fig.height=12, fig.width=6}
+
+p_combined <-
+  p_nonzero +
+  p_discriminability +
+  p_coverage +
+  plot_layout(ncol = 1)
+
+p_combined
+
+ggsave(filename  = "plots/figure_2_metaanalyses.pdf",
+       plot      = p_combined,
+       device    = pdf,
+       # path      = NULL,
+       # dpi       = 300,
+       units     = "in",
+       width     = 6,
+       height    = 12,
+       limitsize = TRUE)
+
+```
+
+# Session info
+
+```{r}
+
+sessionInfo()
+
+```

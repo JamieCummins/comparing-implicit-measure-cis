@@ -30,7 +30,7 @@ library(patchwork)
 library(mdthemes)
 library(lme4)
 library(sjPlot)
-library(marginaleffects)
+library(emmeans)
 library(ggstance)
 library(janitor)
 # library(merTools) called via merTools:: to avoid namespace collisions between MASS and dplyr
@@ -99,101 +99,6 @@ reverse_percent_split <- 100 - percent_split
 
 The "training" data set which we used to refine the code with was `r percent_split`% of the full data set. Results are reported from the remaining `r reverse_percent_split`% testing data set.
 
-# Percent of cases with CIs beyond the bounds
-
-```{r}
-
-data_processed |>
-  count(ci_lower < 0 | ci_upper > 1) |>
-  mutate(percent = round_half_up(n/sum(n)*100, 2)) |>
-  kable() %>%
-  kable_classic(full_width = FALSE)
-
-```
-
-- Results demonstrate that less than one quarter of a percent of participants are affected by this issue. 
-
-# Descriptives: distributions of CI widths
-
-**Descriptive: Non inferential, non preregistered**
-
-Mean and SD can't appropriately describe CI width, as width is a function of the absolute deviation from the zero point (PI = 0.50) in a non linear fashion. This means also makes it more difficult to meta-analyze the CI widths. In lieu of this, we simply provide Maximum A Posteriori (MAP) estimates of the CI widths for each task and domain. NB MAPs are comparable to the mode for continuous data. 
-
-These values are non inferential and were not preregistered.
-
-## MAP CI width
-
-```{r}
-
-data_map_ci_widths <- data_processed %>%
-  group_by(domain, measure) %>%
-  do(point_estimate(.$ci_width, centrality = "MAP")) %>%
-  ungroup()
-
-data_map_ci_widths %>%
-  pivot_wider(names_from = measure, values_from = MAP) %>%
-  round_df(2) %>%
-  t() %>%
-  kable() %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
-
-```
-
-## Plot by domain and measure
-
-```{r}
-
-data_ci_width_map <- data_processed %>%
-  group_by(domain, measure) %>%
-  do(point_estimate(.$ci_width, centrality = "MAP")) %>%
-  ungroup() %>%
-  mutate(domain = fct_rev(domain)) 
-
-# plot
-p_ci_widths <- 
-  ggplot(data_ci_width_map, aes(MAP, fct_rev(measure), color = domain, shape = domain)) + 
-  geom_point(position = position_dodge(width = 0.75)) +
-  scale_shape_manual(values = c(17, 16, 15, 19)) +
-  scale_color_viridis_d(begin = 0.2, end = 0.8, direction = -1) +
-  mdthemes::md_theme_linedraw() +
-  labs(x = "Highest probability (MAP) 95% CI width",
-       y = "",
-       color = "Domain",
-       shape = "Domain") + 
-  theme(legend.position = "top")
-
-p_ci_widths
-
-```
-
-## Plot CI width by |effect|
-
-This is to illustrate the need for MAP CI widths, i.e., because CI width is a function of the absolute effect on the task (deviation from PI = 0.50). 
-
-```{r fig.height=4, fig.width=6}
-
-# plot
-p_ci_widths_by_absolute_score <- 
-  data_processed |>
-  drop_na(measure, domain, estimate, ci_width) |>
-  mutate(absolute_effect = abs(estimate-0.5)) |>
-  ggplot(aes(absolute_effect, ci_width/2)) + 
-  geom_point(aes(color = domain)) +
-  geom_smooth() +
-  facet_wrap(~ measure) +
-  scale_shape_manual(values = c(17, 16, 15, 19)) +
-  scale_color_viridis_d(begin = 0.2, end = 0.8, direction = -1) +
-  mdthemes::md_theme_linedraw() +
-  labs(y = "95% CI width",
-       x = "Absolute effect size on the task (|PI-0.5|)",
-       color = "Domain",
-       shape = "Domain") +
-  theme(legend.position = "top")
-
-p_ci_widths_by_absolute_score
-
-```
-
 # RQ1. Proportion of indiviudal scores that are detectably different from zero
 
 ## Caterpillar plot
@@ -234,9 +139,10 @@ data_diff_zero <-
   mutate(domain = as.factor(domain)) %>%
   group_by(domain, measure) %>%
   summarize(proportion_diff_zero = mean(sig, na.rm = TRUE),
-            variance = var(sig, na.rm = TRUE),
-            standard_error = plotrix::std.error(sig, na.rm = TRUE),
+            variance = plotrix::std.error(sig, na.rm = TRUE)^2,
             .groups = "drop") %>%
+  # logit transform for analysis
+  mutate(proportion_diff_zero_logit = boot::logit(proportion_diff_zero)) %>%
   mutate(variance = ifelse(variance == 0, 0.001, variance))
 
 ```
@@ -247,7 +153,7 @@ data_diff_zero <-
 
 # fit model
 fit_diff_zero <-
-  lmer(proportion_diff_zero ~ 1 + measure + (1 | domain),
+  lmer(proportion_diff_zero_logit ~ 1 + measure + (1 | domain),
        weights = 1/variance,
        data = data_diff_zero)
 
@@ -257,14 +163,14 @@ results_re_tau_diff_zero <- fit_diff_zero %>%
   as_tibble(rownames = "domain") %>%
   rename(tau = value)
 
-# marginal means
-results_diff_zero <- fit_diff_zero |>
-  marginalmeans(variables = "measure") |>
-  dplyr::select(measure = value, estimate, ci_lower = conf.low, ci_upper = conf.high) %>%
-  mutate(se = ((ci_upper - ci_lower)/2) / 1.96,
-         pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)),
+# extract marginal means
+results_diff_zero <-
+  summary(emmeans(fit_diff_zero, ~ measure)) %>%
+  dplyr::select(measure, estimate = emmean, se = SE, ci_lower = lower.CL, ci_upper = upper.CL) %>%
+  mutate(pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)),
          pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2))) |>
-  select(-se) 
+  select(-se) |>
+  mutate_if(is.numeric, boot::inv.logit)
 
 # # plot
 # p_nonzero_meta <-
@@ -284,26 +190,17 @@ results_diff_zero <- fit_diff_zero |>
 results_diff_zero %>%
   round_df(2) %>%
   kable() %>%
-  kable_classic(full_width = FALSE)
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 # tests
-# using marginalmeans
-fit_diff_zero |>
-  marginalmeans(variables = "measure", hypothesis = "pairwise") %>%
-  mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
-  round_df(2) %>%
-  kable() %>%
-  kable_classic(full_width = FALSE)
+data_emms_diff_zero <- emmeans(fit_diff_zero, list(pairwise ~ measure), adjust = "holm")
 
-# using emmeans
-# data_emms_diff_zero <- emmeans(fit_diff_zero, list(pairwise ~ measure), adjust = "holm")
-# 
-# summary(data_emms_diff_zero)$`pairwise differences of measure` %>%
-#   as.data.frame() %>%
-#   select(comparison = 1, p.value) %>%
-#   mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
-#   kable() %>%
-#   kable_classic(full_width = FALSE)
+summary(data_emms_diff_zero)$`pairwise differences of measure` %>%
+  as.data.frame() %>%
+  select(comparison = 1, p.value) %>%
+  mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 ```
 
@@ -315,8 +212,8 @@ data_diff_zero_combined <-
   bind_rows(results_diff_zero %>%
               mutate(domain = "Meta-analysis"),
             data_diff_zero %>%
-              mutate(ci_lower = proportion_diff_zero - standard_error*1.96,
-                     ci_upper = proportion_diff_zero + standard_error*1.96) %>%
+              mutate(ci_lower = proportion_diff_zero - sqrt(variance)*1.96,
+                     ci_upper = proportion_diff_zero + sqrt(variance)*1.96) %>%
               select(measure, domain, estimate = proportion_diff_zero, ci_lower, ci_upper)) %>%
   mutate(domain = fct_relevel(domain, "Meta-analysis", "Self", "Race", "Politics"),
          point_size = case_when(domain == "Meta-analysis" ~ 2.5,
@@ -386,38 +283,38 @@ As such, it is more appropriate and liberal to test for differences between each
 
 # discriminatory using the significance of the difference score
 # the goal here is to assess mean_diff > 1.96 * sqrt(SE1^2 + SE2^2 for every possible comparison EXCLUDING self comparisons. This is tricky to do within a typical tidyverse workflow as it means doing mutates involving each row of a column and every other row of that column but not the same row.
-# the below solution is to use expand.grid to find all combinations of a row with itself, and then use the modulus of the length of the row to filter out the self-pairings. Then do mutates on the rows to assess significant differences. It's enough to then summarize the proportion of significant results across all participants.
+  # the below solution is to use expand.grid to find all combinations of a row with itself, and then use the modulus of the length of the row to filter out the self-pairings. Then do mutates on the rows to assess significant differences. It's enough to then summarize the proportion of significant results across all participants.
 discriminability <- function(data, i) {
   data_with_indexes <- data[i,] # boot function requires data and index
-  
+
   grid_estimates <- expand.grid(data_with_indexes$estimate, data_with_indexes$estimate) |>
     mutate(diff = Var1 - Var2,
            row_number = row_number(),
            modulus = row_number %% (nrow(data_with_indexes)+1)) |>
     filter(modulus != 1) |>
     select(diff)
-  
+
   grid_se <- expand.grid(data_with_indexes$se, data_with_indexes$se) |>
     mutate(critical_value = 1.96 * sqrt(Var1^2 + Var2^2),
            row_number = row_number(),
            modulus = row_number %% (nrow(data_with_indexes)+1)) |>
     filter(modulus != 1) |>
     select(critical_value)
-  
+
   proportion_sig_diff <-
     bind_cols(grid_estimates, grid_se) |>
     mutate(sig = abs(diff) > critical_value) |>
     summarize(proportion_sig_diff = mean(sig, na.rm = TRUE)) |>
     pull(proportion_sig_diff)
-  
+
   return(proportion_sig_diff)
 }
 
 bootstrap_discriminability <- function(data){
-  
+
   require(dplyr)
   require(boot)
-  
+
   fit <-
     boot::boot(data      = data,
                statistic = discriminability,
@@ -426,27 +323,27 @@ bootstrap_discriminability <- function(data){
                stype     = "i",
                parallel  = "multicore",
                ncpus     = parallel::detectCores())
-  
+
   results <- boot::boot.ci(fit, conf = 0.95, type = c("perc"))
-  
+
   output <-
     tibble(
       estimate = fit$t0,
       ci_lower = results$percent[4],
       ci_upper = results$percent[5]
     )
-  
+
   return(output)
 }
 
 # bootstrapping has a long execution time, so load saved values if they've already been calculated
-if(file.exists("../../data/results/data_discriminability.csv")) {
-  
-  data_discriminability <- read_csv("../../data/results/data_discriminability.csv") |>
+if(file.exists("../../data/results/data_discriminability_preregistered.csv")) {
+
+  data_discriminability <- read_csv("../../data/results/data_discriminability_preregistered.csv") |>
     mutate(measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT"))
-  
+
 } else {
-  
+
   # bootstrap D scores
   data_discriminability <- data_processed |>
     mutate(se = (ci_upper - ci_lower)/(1.96*2)) |>
@@ -455,21 +352,23 @@ if(file.exists("../../data/results/data_discriminability.csv")) {
     do(bootstrap_discriminability(data = .)) |>
     ungroup() |>
     rename(proportion_discriminable = estimate) |>
+    # logit transform for analysis
     mutate(variance = ((ci_upper - ci_lower)/(1.96*2))^2,
            domain = as.factor(domain),
            measure = fct_relevel(measure, "IAT", "Brief IAT", "SC-IAT", "AMP", "GNAT", "EPT")) %>%
     mutate(variance = ifelse(variance == 0, 0.001, variance)) |>
-    # model cannot be run on zero variance or 0 or 1, so offset by a minuscule amount
+    # model cannot be run on zero variance or 0 or 1 logit, so offset by a minuscule amount
     mutate(
       proportion_discriminable_temp = case_when(proportion_discriminable < 0.001 ~ 0.001,
                                                 proportion_discriminable > 0.999 ~ 0.999,
-                                                TRUE ~ proportion_discriminable)
+                                                TRUE ~ proportion_discriminable),
+      proportion_discriminable_logit = boot::logit(proportion_discriminable_temp)
     ) %>%
     select(-proportion_discriminable_temp)
-  
+
   # save to disk
-  write_csv(data_discriminability, "../../data/results/data_discriminability.csv")
-  
+  write_csv(data_discriminability, "../../data/results/data_discriminability_preregistered.csv")
+
 }
 
 ```
@@ -480,7 +379,7 @@ if(file.exists("../../data/results/data_discriminability.csv")) {
 
 # fit meta analytic model
 fit_disciminability <-
-  lmer(proportion_discriminable ~ 1 + measure + (1 | domain),
+  lmer(proportion_discriminable_logit ~ 1 + measure + (1 | domain),
        weights = 1/variance,
        data = data_discriminability)
 
@@ -491,13 +390,13 @@ results_re_tau_disciminability <- fit_disciminability %>%
   rename(tau = value)
 
 # extract marginal means
-results_disciminability <- fit_disciminability |>
-  marginalmeans(variables = "measure") |>
-  dplyr::select(measure = value, estimate, ci_lower = conf.low, ci_upper = conf.high) %>%
-  mutate(se = ((ci_upper - ci_lower)/2) / 1.96,
-         pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)),
-         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2))) |>
-  select(-se) 
+results_disciminability <-
+  summary(emmeans(fit_disciminability, ~ measure)) %>%
+  dplyr::select(measure, estimate = emmean, se = SE, ci_lower = lower.CL, ci_upper = upper.CL) %>%
+  mutate(pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_disciminability$tau^2)),  # as in metafor package's implementation of credibility intervals, see metafor::predict.rma.R
+         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_disciminability$tau^2))) |>
+  select(-se) |>
+  mutate_if(is.numeric, boot::inv.logit)
 
 # # plot
 # p_discriminability_meta <-
@@ -519,15 +418,17 @@ results_disciminability <- fit_disciminability |>
 results_disciminability %>%
   round_df(2) %>%
   kable() %>%
-  kable_classic(full_width = FALSE)
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 # tests
-fit_disciminability |>
-  marginalmeans(variables = "measure", hypothesis = "pairwise") %>%
+data_emms_disciminability <- emmeans(fit_disciminability, list(pairwise ~ measure), adjust = "holm")
+
+summary(data_emms_disciminability)$`pairwise differences of measure` %>%
+  as.data.frame() %>%
+  select(comparison = 1, p.value) %>%
   mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
-  round_df(2) %>%
   kable() %>%
-  kable_classic(full_width = FALSE)
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 ```
 
@@ -560,8 +461,8 @@ p_discriminability <-
   scale_shape_manual(values = c(15, 16, 16, 16)) +
   scale_size(range = c(1.5, 2.5), guide = "none") +
   scale_x_continuous(breaks = c(0, .25, .5, .75, 1),
-                     labels = c("0.00<br/>(Worse)", "0.25", "0.50", "0.75", "1.00<br/>(Better)")) +
-  coord_cartesian(xlim = c(0, 1)) +
+                     labels = c("0.00<br/>(Worse)", "0.25", "0.50", "0.75", "1.00<br/>(Better)"),
+                     limits = c(0,1)) +
   mdthemes::md_theme_linedraw() +
   labs(x = "Probability that differences can be detected<br/>between two participants' scores<br/>",
        y = "",
@@ -604,7 +505,13 @@ data_ci_width_proportions <- data_processed %>%
   group_by(domain, measure) %>%
   summarize(ci_width_proportion_mean = mean(ci_width_proportion, na.rm = TRUE),
             variance = plotrix::std.error(ci_width_proportion)^2) %>%
-  ungroup() 
+  ungroup() %>%
+  # logit transform
+  mutate(ci_width_proportion_mean_temp = case_when(ci_width_proportion_mean < 0.0001 ~ 0.0001,
+                                                   ci_width_proportion_mean > 0.9999 ~ 0.9999,
+                                                   TRUE ~ ci_width_proportion_mean),
+         ci_width_proportion_mean_logit = boot::logit(ci_width_proportion_mean_temp)) %>%
+  select(-ci_width_proportion_mean_temp)
 
 ```
 
@@ -614,7 +521,7 @@ data_ci_width_proportions <- data_processed %>%
 
 # fit model
 fit_ci_width_proportions <-
-  lmer(ci_width_proportion_mean ~ 1 + measure + (1 | domain),
+  lmer(ci_width_proportion_mean_logit ~ 1 + measure + (1 | domain),
        weights = 1/variance,
        data = data_ci_width_proportions)
 
@@ -625,13 +532,13 @@ results_re_tau_ci_width_proportions <- fit_ci_width_proportions %>%
   rename(tau = value)
 
 # extract marginal means
-results_ci_width_proportions <- fit_ci_width_proportions |>
-  marginalmeans(variables = "measure") |>
-  dplyr::select(measure = value, estimate, ci_lower = conf.low, ci_upper = conf.high) %>%
-  mutate(se = ((ci_upper - ci_lower)/2) / 1.96,
-         pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2)),
-         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_diff_zero$tau^2))) |>
-  select(-se) 
+results_ci_width_proportions <-
+  summary(emmeans(fit_ci_width_proportions, ~ measure)) %>%
+  dplyr::select(measure, estimate = emmean, se = SE, ci_lower = lower.CL, ci_upper = upper.CL) %>%
+  mutate(pi_lower = estimate - (1.96 * sqrt(se^2 + results_re_tau_ci_width_proportions$tau^2)),
+         pi_upper = estimate + (1.96 * sqrt(se^2 + results_re_tau_ci_width_proportions$tau^2))) %>%
+  select(-se) %>%
+  mutate_if(is.numeric, boot::inv.logit)
 
 # # plot
 # p_coverage_meta <-
@@ -651,15 +558,17 @@ results_ci_width_proportions <- fit_ci_width_proportions |>
 results_ci_width_proportions %>%
   round_df(2) %>%
   kable() %>%
-  kable_classic(full_width = FALSE)
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 # tests
-fit_ci_width_proportions |>
-  marginalmeans(variables = "measure", hypothesis = "pairwise") %>%
+data_emms_ci_width_proportions <- emmeans(fit_ci_width_proportions, list(pairwise ~ measure), adjust = "holm")
+
+summary(data_emms_ci_width_proportions)$`pairwise differences of measure` %>%
+  as.data.frame() %>%
+  select(comparison = 1, p.value) %>%
   mutate(p.value = ifelse(p.value < .001, "< .001", round_half_up(p.value, 3))) %>%
-  round_df(2) %>%
   kable() %>%
-  kable_classic(full_width = FALSE)
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 
 ```
 
@@ -721,9 +630,9 @@ Plot 1 shows the point estiamtes and bootstrapped 95% CIs for all participants, 
 
 p_cis_by_domain
 
-ggsave(filename  = "plots/figure_1_cis_by_domain.pdf",
+ggsave(filename  = "plots/figure_1_cis_by_domain_logit.pdf",
        plot      = p_cis_by_domain,
-       device    = cairo_pdf,
+       device    = "pdf",
        # path      = NULL,
        # dpi       = 300,
        units     = "in",
@@ -745,9 +654,9 @@ p_combined <-
 
 p_combined
 
-ggsave(filename  = "plots/figure_2_metaanalyses.pdf",
+ggsave(filename  = "plots/figure_2_metaanalyses_logit.pdf",
        plot      = p_combined,
-       device    = cairo_pdf,
+       device    = "pdf",
        # path      = NULL,
        # dpi       = 300,
        units     = "in",

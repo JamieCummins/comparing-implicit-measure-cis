@@ -1,0 +1,190 @@
+---
+title: "Data processing"
+author: "Jamie Cummins & Ian Hussey"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+```{r}
+
+library(tidyverse)
+library(parallel)
+library(boot)
+
+# explicit_1 <- read_csv("../../data/raw/explicit_vars/explicitmt900000.csv")
+# explicit_2 <- read_csv("../../data/raw/explicit_vars/explicitmt1000000.csv")
+# explicit_3 <- read_csv("../../data/raw/explicit_vars/explicitmt850000.csv")
+# explicit_4 <- read_csv("../../data/raw/explicit_vars/explicitmt950000.csv")
+# 
+# explicit_combined <- explicit_1 |>
+#   bind_rows(explicit_2, explicit_3, explicit_4)
+# 
+# write_rds(explicit_combined, "../../data/raw/explicit_vars/explicit_vars.rds", compress = "gz")
+
+data_raw_explicit <- read_rds("../../data/raw/explicit_vars/explicit_vars.rds")
+
+```
+
+# Self-report scales
+
+```{r}
+
+data_explicit_scales <- data_raw_explicit |>
+  filter(str_detect(QUESTION_NAME_S, "rwa") |
+         str_detect(QUESTION_NAME_S, "ros") |
+         str_detect(QUESTION_NAME_S, "mrs")) |>
+  mutate(scale = case_when(str_detect(QUESTION_NAME_S, "ros") ~ "rse",
+                           str_detect(QUESTION_NAME_S, "rwa") ~ "rwa",
+                           str_detect(QUESTION_NAME_S, "mrs") ~ "mrs"),
+         response = as.numeric(QUESTION_RESPONSE_S)) |>
+  select(session_id = SESSION_ID,
+         scale, 
+         item = QUESTION_NAME_S,
+         response) 
+
+```
+
+# apply exclusions (complete data)
+
+```{r}
+
+#mrs 6
+#rwa 15
+#rse 10
+
+explicit_complete_sessions <- data_explicit_scales |>
+  filter(!is.na(response)) |>
+  count(session_id, scale) |>
+  filter((scale == "mrs" & n == 6) |
+         (scale == "rwa" & n == 15) |
+         (scale == "rse" & n == 10)) 
+
+
+data_explicit_exclusions_applied <- data_explicit_scales |>
+  semi_join(explicit_complete_sessions,
+            by = c("session_id", "scale"))
+
+
+write_rds(data_explicit_exclusions_applied, "../../data/processed/explicit_vars/data_explicit_exclusions_applied.rds", compress = "gz")
+# all_exclusions_applied_df <- read_rds("../../data/processed/data_trials_for_bootstrapping.rds")
+
+```
+
+
+# handle reverse scoring
+
+```{r}
+# RSE: 8 6 2 5 9; range 1-6
+# MRS: 2; range 1-6
+# RWA: 8 4 12 2 6 14 10; range 1-6
+data_explicit_scores_reversed <- data_explicit_exclusions_applied |>
+  mutate(
+    response = case_when(
+    scale == "rse" & item %in% c("ros2", "ros5", "ros6",
+                                 "ros8", "ros9") ~ (6 - response) + 1,
+    scale == "mrs" & item %in% c("mrs2") ~ (6 - response) + 1,
+    scale == "rwa" & item %in% c("rwa2", "rwa4", "rwa6",
+                                 "rwa8", "rwa10", "rwa12", "rwa14") ~ (6 - response) + 1,
+    TRUE ~ response)
+    )
+
+
+```
+
+# bootstrap 95% CIs and compare against neutral point 
+
+```{r}
+
+set.seed(42)
+
+n_boots = 2000
+subset_sample = FALSE # to reduce processing time for testing
+
+if(TRUE){
+  
+  # calculation of sum score
+  scale_mean <- function(data, i) {
+    data_with_indexes <- data[i,] # boot function requires data and index
+    sum <- sum(data_with_indexes$response)
+    return(sum)
+  }
+  
+  bootstrap_mean_score <- function(data){
+    
+    require(dplyr)
+    require(boot)
+    
+    fit <- 
+      boot::boot(data      = data, 
+                 statistic = scale_mean, 
+                 R         = n_boots, 
+                 sim       = "ordinary", 
+                 stype     = "i",
+                 parallel  = "multicore", 
+                 ncpus     = parallel::detectCores()-1)
+    
+    # results <- boot::boot.ci(fit, conf = 0.95, type = c("bca"))
+    # 
+    # output <- 
+    #   tibble(method   = "bca",
+    #          estimate = fit$t0,
+    #          ci_lower = results$bca[4],
+    #          ci_upper = results$bca[5])
+    # returns error: estimated adjustment 'w' is infinite
+    
+    results <- boot::boot.ci(fit, conf = 0.95, type = c("basic"))
+    
+    output <- 
+      tibble(method   = "basic",
+             estimate = fit$t0,
+             ci_lower = results$basic[4],
+             ci_upper = results$basic[5])
+    
+    return(output)
+  }
+  
+  
+  if(subset_sample == TRUE) {
+    trials_to_process <- data_explicit_scores_reversed |>
+      slice_head(n = 500000)
+    } else {
+    trials_to_process <- data_explicit_scores_reversed
+  }
+  
+  # bootstrap A scores 
+  mean_explicit_scores <- trials_to_process |>
+    mutate(session_id = as.factor(session_id),
+           scale = as.factor(scale)) |>
+    
+    # 
+    group_by(session_id, scale) |>
+    do(bootstrap_mean_score(data = .)) |>
+    ungroup() |>
+    mutate(ci_lower = ifelse(is.na(ci_lower), 0, ci_lower),
+           ci_upper = ifelse(is.na(ci_upper), 0, ci_upper),
+           ci_width = ci_upper - ci_lower ) 
+  
+}
+
+```
+
+
+# write to disk
+
+```{r}
+
+data_processed <- 
+  mean_explicit_scores 
+
+write_rds(data_processed, "../../data/processed/explicit_vars/data_processed.rds")
+
+```
+
+
+

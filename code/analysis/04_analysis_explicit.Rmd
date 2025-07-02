@@ -1,0 +1,289 @@
+---
+title: "Comparing 6 implicit measures' suitability for individual use"
+author: "Jamie Cummins & Ian Hussey"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    highlight: haddock
+    theme: flatly
+    toc: yes
+    toc_float: yes
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(message=FALSE,
+                      warning=FALSE,
+                      cache.lazy=FALSE)
+```
+
+```{r}
+
+# dependencies
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(boot)
+library(parallel)
+library(bayestestR)
+library(patchwork)
+library(mdthemes)
+library(lme4)
+library(sjPlot)
+library(marginaleffects)
+library(ggstance)
+library(janitor)
+# library(merTools) called via merTools:: to avoid namespace collisions between MASS and dplyr
+
+# create necessary directories
+dir.create("../../data/results")
+dir.create("plots")
+
+# set seed for reproducibility
+set.seed(42)
+
+# options
+options(knitr.table.format = "html") # necessary configuration of tables
+
+# disable scientific notation
+options(scipen = 999)
+
+
+# function to round all numeric vars in a data frame
+round_df <- function(df, n_digits = 3) {
+  require(janitor)
+  df %>% mutate_if(is.numeric, janitor::round_half_up, digits = n_digits)
+}
+
+```
+
+# Load in explicit data
+
+```{r}
+
+data_explicit_measures <- read_rds("../../data/processed/explicit_vars/data_processed.rds")
+
+```
+
+# MAP precision of each of the three measures
+
+## MAP CI width
+
+```{r}
+
+data_map_explicit_ci_widths <- data_explicit_measures %>%
+  group_by(scale) %>%
+  do(point_estimate(.$ci_width, centrality = "MAP")) %>%
+  ungroup()
+
+data_map_explicit_ci_widths %>%
+  pivot_wider(names_from = scale, values_from = MAP) %>%
+  round_df(2) %>%
+  t() %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+
+```
+
+## plot
+
+```{r}
+
+p_cis_by_domain_explicit <-
+  data_explicit_measures %>%
+  arrange(estimate) %>%
+  group_by(scale) %>%
+  mutate(ordered_id = row_number()/n()) %>%
+  ungroup() %>%
+  ggplot() +
+  geom_linerange(aes(x = ordered_id, ymin = ci_lower, ymax = ci_upper),
+                 alpha = 1) +
+  geom_point(aes(ordered_id, estimate), size = 0.5, shape = "square") +
+  mdthemes::md_theme_linedraw() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "top") +
+  scale_color_viridis_d(end = 0.6, direction = -1) +
+  xlab("Ranked participant") +
+  ylab("Scale score") +
+  facet_grid(~scale)
+
+p_cis_by_domain_explicit
+
+```
+
+
+# Discriminability between participants
+
+There is no zero point in the scales, so estimating difference from it would not be possible. So we move straight to discriminability between participants. 
+
+```{r}
+
+# function for discriminability assessment
+discriminability <- function(data, i) {
+  data_with_indexes <- data[i,] # boot function requires data and index
+  
+  grid_estimates <- expand.grid(data_with_indexes$estimate, data_with_indexes$estimate) |>
+    mutate(diff = Var1 - Var2,
+           row_number = row_number(),
+           modulus = row_number %% (nrow(data_with_indexes)+1)) |>
+    filter(modulus != 1) |>
+    select(diff)
+  
+  grid_se <- expand.grid(data_with_indexes$se, data_with_indexes$se) |>
+    mutate(critical_value = 1.96 * sqrt(Var1^2 + Var2^2),
+           row_number = row_number(),
+           modulus = row_number %% (nrow(data_with_indexes)+1)) |>
+    filter(modulus != 1) |>
+    select(critical_value)
+  
+  proportion_sig_diff <-
+    bind_cols(grid_estimates, grid_se) |>
+    mutate(sig = abs(diff) > critical_value) |>
+    summarize(proportion_sig_diff = mean(sig, na.rm = TRUE)) |>
+    pull(proportion_sig_diff)
+  
+  return(proportion_sig_diff)
+}
+
+# function for bootstrapping discriminability assessment 
+bootstrap_discriminability <- function(data){
+  
+  require(dplyr)
+  require(boot)
+  
+  fit <-
+    boot::boot(data      = data,
+               statistic = discriminability,
+               R         = 2000,
+               sim       = "ordinary",
+               stype     = "i",
+               parallel  = "multicore",
+               ncpus     = parallel::detectCores())
+  
+  results <- boot::boot.ci(fit, conf = 0.95, type = c("perc"))
+  
+  output <-
+    tibble(
+      estimate = fit$t0,
+      ci_lower = results$percent[4],
+      ci_upper = results$percent[5]
+    )
+  
+  return(output)
+}
+
+# bootstrapping has a long execution time, so load saved values if they've already been calculated
+if(file.exists("../../data/results/explicit_vars/data_explicit_discriminability.csv")) {
+  
+  data_discriminability <- read_csv(
+    "../../data/results/explicit_vars/data_explicit_discriminability.csv"
+    ) |>
+    mutate(scale = fct_relevel(scale, "rse", "rwa", "mrs"))
+  
+} else {
+  
+  # bootstrap D scores
+  data_discriminability <- data_explicit_measures |>
+    mutate(se = (ci_upper - ci_lower)/(1.96*2)) |>
+    select(session_id, scale, estimate, se) |>
+    group_by(scale) |>
+    do(bootstrap_discriminability(data = .)) |>
+    ungroup() |>
+    rename(proportion_discriminable = estimate) |>
+    mutate(variance = ((ci_upper - ci_lower)/(1.96*2))^2,
+           scale = fct_relevel(scale, "rse", "rwa", "mrs")) %>%
+    mutate(variance = ifelse(variance == 0, 0.001, variance)) |>
+    # model cannot be run on zero variance or 0 or 1, so offset by a minuscule amount
+    mutate(
+      proportion_discriminable_temp = case_when(proportion_discriminable < 0.001 ~ 0.001,
+                                                proportion_discriminable > 0.999 ~ 0.999,
+                                                TRUE ~ proportion_discriminable)
+    ) %>%
+    select(-proportion_discriminable_temp)
+  
+  # save to disk
+  write_csv(data_discriminability,
+            "../../data/results/explicit_vars/data_explicit_discriminability.csv")
+  
+}
+
+```
+
+## Discriminability estimates
+
+```{r}
+
+data_discriminability
+
+```
+
+
+# Coverage of scores
+
+## Calculate scores
+
+```{r}
+
+## calculate observed ranges
+observed_range_estimates_explicit <- data_explicit_measures %>%
+  group_by(scale) %>%
+  dplyr::summarize(min = min(ci_lower, na.rm = TRUE),
+                   max = max(ci_upper, na.rm = TRUE),
+                   .groups = "drop") %>%
+  mutate(range = max - min)
+
+# calculate CI / range
+data_ci_width_proportions_explicit <- data_explicit_measures %>%
+  # join this data into the original data
+  full_join(observed_range_estimates_explicit, by = c("scale")) %>%
+  # calculate ci width as a proportion of observed range
+  mutate(ci_width_proportion = ci_width / range,
+         scale = fct_relevel(scale, "rse", "rwa", "mrs")) %>%
+  group_by(scale) %>%
+  summarize(ci_width_proportion_mean = mean(ci_width_proportion, na.rm = TRUE),
+            variance = plotrix::std.error(ci_width_proportion)^2) %>%
+  ungroup() 
+
+```
+
+## FE-Model
+
+```{r}
+
+# fit model
+fit_ci_width_proportions <-
+  data_explicit_measures |>
+       mutate(scale = as.factor(scale),
+              ci_width_proportion = case_when(
+                scale == "mrs" ~ 
+                  ci_width / (observed_range_estimates_explicit |> filter(scale == "mrs") |> pull(range)),
+                scale == "rse" ~ 
+                  ci_width / (observed_range_estimates_explicit |> filter(scale == "rse") |> pull(range)),
+                scale == "rwa" ~ 
+                  ci_width / (observed_range_estimates_explicit |> filter(scale == "rwa") |> pull(range))
+              )) |>
+  ungroup() %>%
+  lm(ci_width_proportion ~ scale,
+       data = .) 
+
+predictions(fit_ci_width_proportions,
+            by = "scale",
+            newdata = datagrid(grid_type = "balanced"))
+
+# extract marginal means
+results_ci_width_proportions <- fit_ci_width_proportions |>
+  predictions(variables = "scale") |>
+  dplyr::select(scale, estimate, ci_lower = conf.low, ci_upper = conf.high) 
+
+```
+
+
+# Session info
+
+```{r}
+
+sessionInfo()
+
+```
